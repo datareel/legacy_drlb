@@ -42,7 +42,9 @@ System administrators, follow the instructions below to build an RPM
 for distribution:
 
 $ cd $HOME; mkdir -pv git; cd $HOME/git
-$ git clone https://github.com/datareel/ssl-bridge
+$ wget https://datareel.com/downloads/drlb/ssl-bridge-<version>.tar.gz
+$ tar xzf ssl-bridge-<version>.tar.gz
+$ mv ssl-bridge-<version> ssl-bridge
 $ cd ${HOME}/git/ssl-bridge/rpm_builder
 
 RHEL7/CENTOS7:
@@ -72,7 +74,9 @@ from source code:
 $ cd $HOME
 $ mkdir -pv git
 $ cd $HOME/git
-$ git clone https://github.com/datareel/ssl-bridge
+$ wget https://datareel.com/downloads/drlb/ssl-bridge-<version>.tar.gz
+$ tar xzf ssl-bridge-<version>.tar.gz
+$ mv ssl-bridge-<version> ssl-bridge
 $ source $HOME/git/ssl-bridge/env/gnu_env.sh
 $ cd $HOME/git/ssl-bridge/ssl_bridge
 $ make
@@ -219,5 +223,5 @@ Remaining work on this project
 Support and Bug Tracking
 ------------------------
 
-https://github.com/datareel/ssl-bridge/issues
+https://datareel.com/contact.php
 
