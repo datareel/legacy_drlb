@@ -4,8 +4,8 @@ DataReel Copyright (c) 2016-2024 DataReel Software Development
 Online docs:
 http://datareel.com/info_drlb.html
 
-Source Code:
-https://github.com/datareel/load-balancer
+Source code and downloads:
+https://datareel.com/downloads/drlb/
 
 Contents:
 --------
@@ -106,7 +106,9 @@ Developers, follow the instructions below to build the DRLB server:
 $ cd $HOME
 $ mkdir -pv git
 $ cd $HOME/git
-$ git clone https://github.com/datareel/load-balancer
+$ wget https://datareel.com/downloads/drlb/load-balancer-<version>.tar.gz
+$ tar xzf load-balancer-<version>.tar.gz
+$ mv load-balancer-<version> load-balancer
 $ source $HOME/git/load-balancer/env/gnu_env.sh
 $ cd $HOME/git/load-balancer/drlb_server
 $ make
@@ -134,7 +136,9 @@ System administrators, follow the instructions below to build an RPM
 for distribution:
 
 $ cd $HOME; mkdir -pv git; cd $HOME/git
-$ git clone https://github.com/datareel/load-balancer
+$ wget https://datareel.com/downloads/drlb/load-balancer-<version>.tar.gz
+$ tar xzf load-balancer-<version>.tar.gz
+$ mv load-balancer-<version> load-balancer
 $ cd ${HOME}/git/load-balancer/rpm_builder
 
 RHEL7/CENTOS7:
@@ -1139,6 +1143,6 @@ Remaining work for this open source project:
 
 Support and Bug Tracking
 ------------------------
-https://github.com/datareel/load-balancer/issues
+https://datareel.com/contact.php
 
 

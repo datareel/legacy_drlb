@@ -43,7 +43,9 @@ System administrators, follow the instructions below to build an RPM
 for distribution:
 
 $ cd $HOME; mkdir -pv git; cd $HOME/git
-$ git clone https://github.com/datareel/LDM-load-balancer
+$ wget https://datareel.com/downloads/drlb/LDM-load-balancer-<version>.tar.gz
+$ tar xzf LDM-load-balancer-<version>.tar.gz
+$ mv LDM-load-balancer-<version> LDM-load-balancer
 $ cd ${HOME}/git/LDM-load-balancer/rpm_builder
 
 RHEL7/CENTOS7:
@@ -73,7 +75,9 @@ server:
 $ cd $HOME
 $ mkdir -pv git
 $ cd $HOME/git
-$ git clone https://github.com/datareel/LDM-load-balancer
+$ wget https://datareel.com/downloads/drlb/LDM-load-balancer-<version>.tar.gz
+$ tar xzf LDM-load-balancer-<version>.tar.gz
+$ mv LDM-load-balancer-<version> LDM-load-balancer
 $ source $HOME/git/LDM-load-balancer/env/gnu_env.sh
 $ cd $HOME/git/LDM-load-balancer/drlb_ldm
 $ make
@@ -157,5 +161,5 @@ Remaining work on this project
 Support and Bug Tracking
 ------------------------
 
-https://github.com/datareel/LDM-load-balancer/issues
+https://datareel.com/contact.php
 
