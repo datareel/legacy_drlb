@@ -5,11 +5,16 @@ BUILDDIR_tmp="/tmp/drlb_build_${USERNAME}"
 
 if [ -z $1 ]; then
     echo "You must supply a OS version"
-    echo "Usage: ${0} rhel6|rhel7|rhel8|rhel9"
+    echo "Usage: ${0} rhel8|rhel9|rhel10"
     exit 1
 fi
 
 OS=${1,,}
+
+case "${OS}" in
+    rhel8|rhel9|rhel10) ;;
+    *) echo "ERROR - Unsupported OS version: ${1}. Use rhel8, rhel9, or rhel10"; exit 1 ;;
+esac
 
 if [ ! -z "${2}" ]; then BUILDDIR_tmp="${2}"; fi
  
@@ -51,7 +56,7 @@ if [ ! -d "${Build}" ]; then
     exit 1;
 fi
 
-source ../../env/gnu_env.sh
+source ../env/gnu_env.sh
 cd ../drlb_server
 make clean_lib
 make clean
@@ -61,8 +66,6 @@ mkdir -p ${Build}/etc/drlb
 chmod 755 ${Build}/etc/drlb
 mkdir -p ${Build}/var/log/drlb
 chmod 755 ${Build}/var/log/drlb
-mkdir -p ${Build}/var/run/drlb
-chmod 755 ${Build}/var/run/drlb
 mkdir -p ${Build}/usr/sbin
 chmod 755 ${Build}/usr/sbin
 cp -fv ../drlb_server/drlb_server ${Build}/usr/sbin/drlb_server
@@ -75,10 +78,12 @@ cp -fv ../etc/active_configs.list_template ${Build}/etc/drlb/active_configs.list
 chmod 644 ${Build}/etc/drlb/active_configs.list
 cp -fv ../etc/http_rr_test.cfg ${Build}/etc/drlb/http_rr_test.cfg
 chmod 644 ${Build}/etc/drlb/http_rr_test.cfg
-mkdir -p ${Build}/etc/rc.d/init.d
-chmod 755 ${Build}/etc/rc.d/init.d
-cp -fv ../system5_init/drlb_server ${Build}/etc/rc.d/init.d/drlb_server
-chmod 755 ${Build}/etc/rc.d/init.d/drlb_server
+mkdir -p ${Build}/usr/libexec/drlb
+chmod 755 ${Build}/usr/libexec/drlb
+cp -fv ../systemd_init/drlb_platform_check ${Build}/usr/libexec/drlb/drlb_platform_check
+chmod 755 ${Build}/usr/libexec/drlb/drlb_platform_check
+cp -fv ../systemd_init/drlb_server_ctl ${Build}/usr/libexec/drlb/drlb_server_ctl
+chmod 755 ${Build}/usr/libexec/drlb/drlb_server_ctl
 mkdir -p ${Build}/usr/share/doc/drlb
 chmod 755 ${Build}/usr/share/doc/drlb
 cp -fv ../README.txt ${Build}/usr/share/doc/drlb/README.txt
@@ -91,12 +96,12 @@ mkdir -p ${Build}/usr/share/man/man8
 chmod 755 ${Build}/usr/share/man/man8
 gzip -c ../man/drlb_server.8 > ${Build}/usr/share/man/man8/drlb_server.8.gz
 chmod 644  ${Build}/usr/share/man/man8/drlb_server.8.gz
-if [ "${OS}" == "rhel7" ] || [ "${OS}" == "rhel8" ] || [ "${OS}" == "rhel9" ]; then
-    mkdir -p ${Build}/etc/systemd/system
-    chmod 755 ${Build}/etc/systemd/system
-    cp -fv ../systemd_init/drlb_server.service  ${Build}/etc/systemd/system/drlb_server.service
-    chmod 644 ${Build}/etc/systemd/system/drlb_server.service
-fi
+mkdir -p ${Build}/usr/lib/systemd/system
+chmod 755 ${Build}/usr/lib/systemd/system
+cp -fv ../systemd_init/drlb_server.service ${Build}/usr/lib/systemd/system/drlb_server.service
+chmod 644 ${Build}/usr/lib/systemd/system/drlb_server.service
+cp -fv ../systemd_init/drlb_server@.service ${Build}/usr/lib/systemd/system/drlb_server@.service
+chmod 644 ${Build}/usr/lib/systemd/system/drlb_server@.service
 
 cd ${Build}
 if [ -f ${HOME}/rpmbuild/BUILD/drlb_server.tar.gz ]; then

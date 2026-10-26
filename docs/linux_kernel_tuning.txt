@@ -1,5 +1,5 @@
 Linux kernel tuning for load balancing
-Last modified: 04/11/2017
+Last modified: 10/25/2026
 
 NOTICE: Any setting you make to change default kernel settings and/or
 user limits must be implemented with caution. All changes should be
@@ -21,19 +21,13 @@ orginal settings before making any changes, for example:
 
 # sysctl fs.file-max | tee -a /root/sysctl_org_settings.txt
 
-To make the changes persistent, add the setting(s) to the sysctl.conf
-file:
+To make the changes persistent, add the setting(s) to a file in
+/etc/sysctl.d:
 
-CENTOS 5/6 or RHEL 5/6:
-# vi /etc/sysctl.conf
-
-CENTOS 7 or RHEL 7:
 # vi /etc/sysctl.d/01-lb.conf
 
-To load changes CENTOS 5/6 or RHEL 5/6:
-# sysctl -p
+To load changes:
 
-To load changes CENTOS 7 or RHEL 7:
 # sysctl -p /etc/sysctl.d/01-lb.conf
 
 File Handle Limits:
@@ -44,10 +38,10 @@ fs.file-max = 25000000
 
 IPv4 Socket Tuning:
 ------------------
-For a large numbers of concurent sessions:
+For a large numbers of concurent sessions. NOTE: net.ipv4.tcp_tw_recycle
+was removed from the Linux kernel and must not be set:
 
 net.ipv4.ip_local_port_range = 1024 65535
-net.ipv4.tcp_tw_recycle = 1
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 60
 net.core.rmem_max = 16777216
@@ -65,13 +59,14 @@ net.ipv4.ip_nonlocal_bind=1
 Process Scheduler:
 -----------------
 Increase time for process run time before the kernel will consider
-migrating it again to another core: 
+migrating it again to another core. On RHEL 9 and RHEL 10 this
+setting moved from sysctl to debugfs:
 
-CENTOS 5/6 or RHEL 5/6:
-kernel.sched_migration_cost = 5000000
-
-CENTOS 7 or RHEL 7:
+RHEL 8:
 kernel.sched_migration_cost_ns = 5000000
+
+RHEL 9 and RHEL 10:
+# echo 5000000 > /sys/kernel/debug/sched/migration_cost_ns
 
 kernel.sched_autogroup_enabled = 0
 
@@ -82,4 +77,3 @@ Increase maximum number of threads that can be created by a process:
 kernel.threads-max = 5000000
 vm.max_map_count = 128000
 kernel.pid_max = 65536
-

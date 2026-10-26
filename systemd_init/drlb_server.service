@@ -1,17 +1,19 @@
 [Unit]
-Description=DR load balancer service
-After=network.target
+Description=DataReel TCP load balancer (all active configurations)
+Documentation=man:drlb_server(8)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
+Type=oneshot
+RemainAfterExit=yes
 LimitNOFILE=65535
-Type=forking
-EnvironmentFile=/etc/sysconfig/drlb_server
-ExecStart=/etc/rc.d/init.d/drlb_server start
-ExecReload=/etc/rc.d/init.d/drlb_server reload
-ExecStop=/etc/rc.d/init.d/drlb_server stop
-
-StandardOutput=syslog
-StandardError=syslog
+EnvironmentFile=-/etc/sysconfig/drlb_server
+ExecStartPre=/usr/libexec/drlb/drlb_platform_check
+ExecStart=/usr/libexec/drlb/drlb_server_ctl start
+ExecStop=/usr/libexec/drlb/drlb_server_ctl stop
+ExecReload=/usr/libexec/drlb/drlb_server_ctl restart
+TimeoutStopSec=120
 
 [Install]
 WantedBy=multi-user.target

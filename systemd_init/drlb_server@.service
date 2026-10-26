@@ -1,0 +1,21 @@
+# Run one DRLB configuration as its own service:
+# systemctl enable --now drlb_server@http_rr_test   (/etc/drlb/http_rr_test.cfg)
+# Do not list a configuration run this way in /etc/drlb/active_configs.list.
+[Unit]
+Description=DataReel TCP load balancer (/etc/drlb/%i.cfg)
+Documentation=man:drlb_server(8)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+LimitNOFILE=65535
+EnvironmentFile=-/etc/sysconfig/drlb_server
+ExecStartPre=/usr/libexec/drlb/drlb_platform_check
+ExecStart=/usr/sbin/drlb_server --config-file=/etc/drlb/%i.cfg
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

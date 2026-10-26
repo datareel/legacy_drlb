@@ -19,8 +19,6 @@ install_root:
 	chmod 755 /etc/drlb
 	mkdir -pv /var/log/drlb
 	chmod 755 /var/log/drlb
-	mkdir -pv /var/run/drlb
-	chmod 755 /var/run/drlb
 	cp -fv drlb_server /usr/sbin/drlb_server
 	chmod 755 /usr/sbin/drlb_server
 	if [ ! -f /etc/sysconfig/drlb_server ]; then cp -fv ../etc/drlb_server_sysconfig  /etc/sysconfig/drlb_server; fi
@@ -29,13 +27,17 @@ install_root:
 	chmod 644 /etc/drlb/active_configs.list
 	if [ ! -f /etc/drlb/http_rr_test.cfg ]; then cp -fv ../etc/http_rr_test.cfg /etc/drlb/http_rr_test.cfg; fi
 	chmod 644 /etc/drlb/http_rr_test.cfg
-	cp -fv ../system5_init/drlb_server /etc/rc.d/init.d/drlb_server
-	chmod 755 /etc/rc.d/init.d/drlb_server
-	if [ ! -d /etc/systemd/system ]; then chkconfig --add drlb_server; fi
-	if [ ! -d /etc/systemd/system ]; then chkconfig drlb_server off; fi
-	if [ -d /etc/systemd/system ]; then cp -fv ../systemd_init/drlb_server.service  /etc/systemd/system/drlb_server.service; fi
-	if [ -d /etc/systemd/system ]; then chmod 644 /etc/systemd/system/drlb_server.service; fi
-	if [ -d /etc/systemd/system ]; then systemctl daemon-reload; fi
+	mkdir -pv /usr/libexec/drlb
+	chmod 755 /usr/libexec/drlb
+	cp -fv ../systemd_init/drlb_platform_check /usr/libexec/drlb/drlb_platform_check
+	chmod 755 /usr/libexec/drlb/drlb_platform_check
+	cp -fv ../systemd_init/drlb_server_ctl /usr/libexec/drlb/drlb_server_ctl
+	chmod 755 /usr/libexec/drlb/drlb_server_ctl
+	cp -fv ../systemd_init/drlb_server.service /usr/lib/systemd/system/drlb_server.service
+	chmod 644 /usr/lib/systemd/system/drlb_server.service
+	cp -fv ../systemd_init/drlb_server@.service /usr/lib/systemd/system/drlb_server@.service
+	chmod 644 /usr/lib/systemd/system/drlb_server@.service
+	systemctl daemon-reload
 	mkdir -p /usr/share/doc/drlb
 	chmod 755 /usr/share/doc/drlb
 	cp -fv ../README.txt /usr/share/doc/drlb/README.txt
