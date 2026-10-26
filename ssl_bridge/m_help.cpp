@@ -38,7 +38,7 @@ Help functions for Datareel SSL load balancer.
 #include "m_help.h"
 
 // Version number, program  and publisher info
-const char *VersionString = "1.59";
+const char *VersionString = "1.60";
 const char *ProgramDescription = "DR SSL Load Balancer";
 const char *ProducedBy = "http://datareel.com";
 

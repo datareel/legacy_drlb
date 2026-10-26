@@ -93,6 +93,7 @@ LBconfig::LBconfig()
   stats_thread = 0;
   retries = 3;
   retry_wait = 1;
+  dead_node_secs = 1;
   timeout_secs = 300;
   timeout_usecs = 0;
   use_timeout = 1; // 10/25/2026: Idle connections time out by default
@@ -327,6 +328,7 @@ LBnode::LBnode()
   num_connections = 0;
   num_connections_is_locked = 0;
   lb_flag = 0; // 10/25/2026: Was never initialized
+  down_until = 0;
   lb_flag_is_locked = 0;
   connection_total_is_locked = 0;
   active_ptr = this;
@@ -345,6 +347,7 @@ void LBnode::Copy(const LBnode &n)
   buffer_size = n.buffer_size;
   num_connections = n.num_connections;
   lb_flag = n.lb_flag;
+  down_until = n.down_until;
   node_name = n.node_name;
   num_connections_is_locked = 0;
   connection_total_is_locked = 0;
@@ -776,6 +779,8 @@ int LoadOrBuildConfigFile()
     dfile << "# Retries for backend node connection errors" << "\n";
     dfile << "retries = 3" << "\n";
     dfile << "retry_wait = 1" << "\n";
+    dfile << "# Seconds a node that refused a connection is skipped" << "\n";
+    dfile << "dead_node_secs = 1" << "\n";
     dfile << "#" << "\n";
     dfile << "# Close connections with no data in either direction for timeout_secs" << "\n";
     dfile << "use_timeout = 1" << "\n";
@@ -1128,6 +1133,13 @@ int LoadOrBuildConfigFile()
 	      NT_print("Config file has bad retries value");
 	      error_level = 1;
 	    }
+	  }
+	}
+	if(ptr->data.IFind("dead_node_secs") != -1) {
+	  servercfg->dead_node_secs = CfgGetEqualToParm(ptr->data);
+	  if(servercfg->dead_node_secs < 0) {
+	    NT_print("Config file has bad dead_node_secs value");
+	    error_level = 1;
 	  }
 	}
 	if(ptr->data.IFind("retry_wait") != -1) {

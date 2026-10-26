@@ -40,6 +40,7 @@ Contents:
 * Linux Kernel Tuning
 * Testing with Apache
 * HTTP IP address forwarding
+* Regression tests
 * Remaining work on this project
 * Support and Bug Tracking
 
@@ -868,6 +869,12 @@ modify the following parameters in the [LBSERVER] section:
 ...
 retries = 3
 retry_wait = 1
+dead_node_secs = 1
+
+A node that refuses a connection is skipped for dead_node_secs
+seconds, and its share of new connections goes to the other nodes. If
+all nodes are marked down DRLB tries them all. Set dead_node_secs = 0
+to try every node on every connection.
 
 
 Buffer overflow settings
@@ -1198,6 +1205,18 @@ must add the following to your httpd conf:
 
 LogFormat "%h %l %u %t \"%r\" %>s %b %{X-Forwarded-For}i \"%{Referer}i\" \"%{User-Agent}i\"" combined
 LogFormat "%h %l %u %t \"%r\" %>s %b" %{X-Forwarded-For}i common
+
+Regression tests
+----------------
+After building, run the regression tests from the top of the source
+tree. They start local test servers on 127.0.0.1 and need only Python 3
+(and the openssl command for the SSL bridge):
+
+$ python3 tests/drlb_tests.py
+
+The tests cover load balancing, fail over, timeouts, shutdown and the
+security fixes in this release. Each prints PASS or FAIL per check and
+exits non-zero if any check fails.
 
 Remaining work on this project
 ------------------------------

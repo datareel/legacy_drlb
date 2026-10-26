@@ -102,6 +102,7 @@ struct LBnode {
   int max_connections;   // Max concurrent connections for this node
   int buffer_size;       // read buffer size  
   LBnode *active_ptr;    // Pointer used by a copy of this object to reference the active node
+  volatile time_t down_until; // 10/25/2026: Skipped by round robin until this time
 
 private: // Cannot be accessed directly
   int num_connections;
@@ -179,6 +180,7 @@ struct LBconfig {
   int enable_buffer_overflow_detection;
   unsigned retries;
   unsigned retry_wait;
+  int dead_node_secs; // Seconds a node that failed a connect is skipped
   int timeout_secs;
   int timeout_usecs;
   int use_timeout;
