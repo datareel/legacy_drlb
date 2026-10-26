@@ -50,6 +50,7 @@ Multi-threaded framework Datareel load balancer.
 #include "m_thread.h"
 #include "m_log.h"
 #include "membuf.h"
+#include "m_relay.h"
 
 ClientSocket_t::~ClientSocket_t()
 {
@@ -73,13 +74,8 @@ int LBServerThread::InitServer(int max_connections)
     }
   }
 
-#ifdef SO_REUSEPORT
-  if (setsockopt(gxsocket, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse)) < 0) {
-    if(servercfg->debug) {
-      LogMessage("ERROR - Socket error setting SO_REUSEPORT option");
-    }
-  }
-#endif
+  // 10/25/2026: SO_REUSEPORT is no longer set. It let a second server
+  // bind the same port and silently take a share of the connections.
 
   if(!servercfg->listen_ip_addr.is_null()) {
     if(servercfg->listen_ip_addr != "0.0.0.0") {
@@ -111,7 +107,7 @@ int LBServerThread::InitServer(int max_connections)
 void *LBServerThread::ThreadEntryRoutine(gxThread_t *thread)
 {
   gxString message, sbuf;
-  int accept_retires = 5;
+  unsigned long accept_errors = 0;
   int error_number = 0;
   int num_start_threads = 4; // main + server_thread + log_thread + process_thread
   if(servercfg->enable_stats) num_start_threads++;
@@ -127,22 +123,30 @@ void *LBServerThread::ThreadEntryRoutine(gxThread_t *thread)
     gxsSocketLength_t addr_size = (gxsSocketLength_t)sizeof(remote_sin); 
     remote_socket = accept(gxsocket, (struct sockaddr *)&remote_sin, &addr_size);
     if(remote_socket < 0) {
-      if(servercfg->debug) {
-	get_fd_error(error_number, sbuf);
-	message << clear << " ENUM: " << error_number << " Message: " << sbuf;
-	LogDebugMessage(message.c_str());
-	LogDebugMessage("ERROR - LB server thread accept() call failed");
-      }
-      sSleep(1); // Allow for recovery time
-      if(--accept_retires <= 0) {
-	get_fd_error(error_number, sbuf);
+      // 10/25/2026: Only a broken listening socket ends the server. Running
+      // out of file descriptors or memory, or a client resetting before
+      // accept() returns, is transient. These errors used to stop the whole
+      // balancer after 5 tries, so a connection flood could shut it down.
+      get_fd_error(error_number, sbuf);
+      if(error_number == EBADF || error_number == EINVAL || error_number == ENOTSOCK ||
+	 error_number == EOPNOTSUPP || error_number == EFAULT) {
 	message << clear << "ERROR - accept() call failed, ENUM: " << error_number << " Message: " << sbuf;
 	LogMessage(message.c_str());
 	break;
       }
+      if(error_number == EINTR || error_number == ECONNABORTED || error_number == EAGAIN) continue;
+      if(accept_errors++ == 0 || servercfg->debug) {
+	message << clear << "ERROR - accept() call failed, will keep retrying, ENUM: " << error_number << " Message: " << sbuf;
+	LogMessage(message.c_str());
+      }
+      mSleep(accept_errors < 10 ? 10 * accept_errors : 100); // Back off while resources are exhausted
       continue;
     }
-    accept_retires = 5;
+    if(accept_errors > 0) {
+      message << clear << "INFO - accept() recovered after " << accept_errors << " failed calls";
+      LogMessage(message.c_str());
+      accept_errors = 0;
+    }
 
     servercfg->CONNECTION_TOTAL(1);
 
@@ -436,12 +440,13 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
     LogDebugMessage(message.c_str());
   }
 
-  if(servercfg->use_buffer_cache) {
-    LB_CachedReadWrite(s, n->buffer_size);
-  }
-  else {
-    LB_ReadWrite(s, n->buffer_size);
-  }
+  RelaySide frontend, backend;
+  frontend.fd = s->client_socket; frontend.name = "Frontend"; frontend.is_frontend = 1;
+  backend.fd = s->client.GetSocket(); backend.name = "Backend";
+  HttpForwardFilter http_filter;
+  RelayFilter *filter = 0;
+  if(servercfg->enable_http_forwarding) filter = &http_filter;
+  LB_Relay(s, frontend, backend, n->buffer_size, filter);
 
   shutdown(s->client_socket, SHUT_RDWR);
   shutdown(s->client.GetSocket(), SHUT_RDWR);
@@ -452,400 +457,6 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
   }
 
   return;
-}
-
-int LBClientRequestThread::LB_ReadWrite(ClientSocket_t *s, int buffer_size)
-{
-  gxString sbuf, message;
-  unsigned seq_num = s->seq_num;
-  char *buffer = new char[buffer_size];
-  int br, bm, flags1, ready, error_number;
-  int error_level = 0;
-  int idle_count = 0;
-
-  while(servercfg->accept_clients) {
-    if(servercfg->use_timeout && (!ReadSelect(s->client_socket, servercfg->timeout_secs, servercfg->timeout_usecs))) {
-      if(servercfg->debug || servercfg->log_level >= 4) {
-	message << clear << "[" << seq_num << "]: Frontend read socket timeout after " 
-		<< servercfg->timeout_secs << " secs " << servercfg->timeout_usecs << " usecs";
-	LogMessage(message.c_str());
-      }
-      ready = 0;
-    }
-    else {
-      if(!servercfg->use_nonblock_sockets) {
-	idle_count++;
-	if(idle_count >= servercfg->max_idle_count) ReadSelect(s->client_socket, servercfg->idle_wait_secs, servercfg->idle_wait_usecs);
-      }
-      flags1 = fcntl(s->client_socket, F_GETFL, 0);
-      fcntl(s->client_socket, F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client_socket, buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client_socket, F_SETFL, flags1); // Set socket back to blocking read
-    }
-    if(ready > 0) {
-      idle_count = 0;
-      br = read(s->client_socket, buffer, buffer_size);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Frontend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	LogMessage(message.c_str());
-      }
-      if(br == 0) {
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: " << "Frontend socket disconnected duing read()";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(br < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error reading from Frontend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      bm = write(s->client.GetSocket(), buffer, br);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Backend write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	LogDebugMessage(message.c_str());
-      }
-      if(bm < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error writing to Backend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(bm != br) {
-	if(servercfg->log_level >= 3 || servercfg->verbose_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Failed to write " << br << " bytes to Backend socket, wrote " << bm;
-	  LogMessage(message.c_str());
-	}
-      }
-    }
-    if(ready == 0) break;
-
-    if(servercfg->use_timeout && (!ReadSelect(s->client.GetSocket(), servercfg->timeout_secs, servercfg->timeout_usecs))) {
-      if(servercfg->debug || servercfg->log_level >= 4) {
-	message << clear << "[" << seq_num << "]: Backend read socket timeout after " 
-		<< servercfg->timeout_secs << " secs " << servercfg->timeout_usecs << " usecs";
-	LogMessage(message.c_str());
-      }
-      ready = 0;
-    }
-    else {
-      flags1 = fcntl(s->client.GetSocket(), F_GETFL, 0);
-      fcntl(s->client.GetSocket(), F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client.GetSocket(), buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client.GetSocket(), F_SETFL, flags1); // Set socket back to blocking read
-    }
-    if(ready > 0) {
-      idle_count = 0;
-      br = read(s->client.GetSocket(), buffer, buffer_size);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Backend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	LogMessage(message.c_str());
-      }
-      if(br == 0) {
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: " << "Backend socket disconnected duing read()";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(br < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error reading from Backend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      bm = write(s->client_socket, buffer, br);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Frontend write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	LogDebugMessage(message.c_str());
-      }
-      if(bm < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error writing to Frontend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(bm != br) {
-	if(servercfg->log_level >= 3 || servercfg->verbose_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Failed to write " << br << " bytes to Frontend socket, wrote " << bm;
-	  LogMessage(message.c_str());
-	}
-      }
-    }
-    if(ready == 0) break;
-  }
-
-  delete buffer;
-  return error_level;
-}
-
-int LBClientRequestThread::LB_CachedReadWrite(ClientSocket_t *s, int buffer_size)
-{
-  gxString sbuf, message;
-  unsigned seq_num = s->seq_num;
-  char *buffer = new char[buffer_size];
-  int br, bm, flags1, ready, error_number, bytes_read, bytes_moved;
-  int error_level = 0;
-  gxList<MemoryBuffer *> cache;
-  gxListNode<MemoryBuffer *> *ptr = 0;
-  int idle_count = 0;
-  unsigned i;
-
-  while(servercfg->accept_clients) {
-    ready = 1;
-    bytes_read = bytes_moved = 0;
-    if(!servercfg->use_nonblock_sockets) {
-      idle_count++;
-      if(idle_count >= servercfg->max_idle_count) ReadSelect(s->client_socket, servercfg->idle_wait_secs, servercfg->idle_wait_usecs);
-    }
-    while(ready > 0) {
-      flags1 = fcntl(s->client_socket, F_GETFL, 0);
-      fcntl(s->client_socket, F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client_socket, buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client_socket, F_SETFL, flags1); // Set socket back to blocking read
-      if(ready > 0) {
-	idle_count = 0;
-	br = read(s->client_socket, buffer, buffer_size);
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  get_fd_error(error_number, sbuf);
-	  message << clear << "[" << seq_num << "]: Cached Frondend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(br == 0) {
-	  if(servercfg->debug && servercfg->debug_level >= 5) { 
-	    message << clear << "[" << seq_num << "]: Frontend socket disconnected duing a cached read()";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-	if(br < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error reading from Frontend client socket";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-
-	MemoryBuffer *inbuf = new MemoryBuffer(buffer, br);
-	cache.Add(inbuf);
-	bytes_read += br;
-
-	if(servercfg->enable_buffer_overflow_detection) {
-	  if(bytes_read >= servercfg->buffer_overflow_size) {
-	    if(servercfg->log_level >= 3) {
-	      message << clear << "[" << seq_num << "]: Frontend read " << bytes_read << " bytes from client";
-	      LogMessage(message.c_str());
-	      message << clear << "[" << seq_num << "]: Closing Frontend connection due to buffer overflow";
-	      LogMessage(message.c_str());
-	    }
-	    error_level = 1;
-	    break;
-	  }
-	}
-      }
-    }
-
-    if(error_level != 0) break;
-
-    if(bytes_read > 0) {
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Frondend bytes read: " << bytes_read;
-	LogDebugMessage(message.c_str());
-      }
-      ptr = cache.GetHead();
-      while(ptr) {
-	if(servercfg->enable_http_forwarding) {
-	  for(i = 0; i < servercfg->num_http_requests; i++) {
-	    if(ptr->data->Find((char *)servercfg->http_requests[i].c_str(), servercfg->http_requests[i].length(), 0) != __MEMBUF_NO_MATCH__) {
-	      if((ptr->data->Find((char *)servercfg->http_hdr_str.c_str(), servercfg->http_hdr_str.length(), 0) != __MEMBUF_NO_MATCH__) &&
-		 (ptr->data->Find((char *)servercfg->http_eol.c_str(), servercfg->http_eol.length(), 0) != __MEMBUF_NO_MATCH__)) {
-		gxString ff;
-		ff << clear << servercfg-> http_forward_for_str << ": " << s->client_name << "\r\n";
-		unsigned offset = ptr->data->Find((char *)servercfg->http_eoh.c_str(), servercfg->http_eoh.length(), 0);
-		if(offset == __MEMBUF_NO_MATCH__) {
-		  ptr->data->Cat((void *)ff.c_str(), ff.length());
-		}
-		else {
-		  ptr->data->InsertAt((offset+2), (void *)ff.c_str(), ff.length());
-		}
-	      }
-	    }
-	  }
-	}
-	bm = write(s->client.GetSocket(), ptr->data->m_buf(), ptr->data->length());
-	get_fd_error(error_number, sbuf);
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: Backend cached write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(bm > 0) bytes_moved += bm;
-	if(bm < 0 && error_number == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	  bm = bytes_moved;
-	  break;
-	}
-	if(bm < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error writing to Backend socket";
-	    LogMessage(message.c_str());
-	    if(servercfg->debug && servercfg->debug_level >= 5) { 
-	      message << clear << "[" << seq_num << "]: Backend write " << bm << " ERROR: " << error_number << ": " << sbuf;
-	      LogMessage(message.c_str());
-	    }
-	    error_level = 1;
-	    break;
-	  }
-	}
-	if(error_level != 0) break;
-	ptr = ptr->next;
-      }
-      if(error_level != 0) break;
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Backend bytes moved: " << bytes_moved;
-	LogDebugMessage(message.c_str());
-      }
-      ptr = cache.GetHead();
-      while(ptr) {
-	delete ptr->data;
-	ptr->data = 0;
-	ptr = ptr->next;
-      }
-      cache.ClearList();
-    }
-    if(error_level != 0) break;
-    if(ready == 0) break;
-
-    ready = 1;
-    bytes_read = bytes_moved = 0;
-    while(ready > 0) {
-      flags1 = fcntl(s->client.GetSocket(), F_GETFL, 0);
-      fcntl(s->client.GetSocket(), F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client.GetSocket(), buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client.GetSocket(), F_SETFL, flags1); // Set socket back to blocking read
-      if(ready > 0) {
-	idle_count = 0;
-	br = read(s->client.GetSocket(), buffer, buffer_size);
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  get_fd_error(error_number, sbuf);
-	  message << clear << "[" << seq_num << "]: Cached Backend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(br == 0) {
-	  if(servercfg->debug && servercfg->debug_level >= 5) { 
-	    message << clear << "[" << seq_num << "]: Backend socket disconnected duing a cached read()";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-	if(br < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error reading from Backend client socket";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-	MemoryBuffer *inbuf = new MemoryBuffer(buffer, br);
-	cache.Add(inbuf);
-	bytes_read += br;
-      }
-    }
-
-    if(error_level != 0) break;
-
-    if(bytes_read > 0) {
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Backend bytes read: " << bytes_read;
-	LogDebugMessage(message.c_str());
-      }
-      ptr = cache.GetHead();
-      while(ptr) {
-	bm = write(s->client_socket, ptr->data->m_buf(), ptr->data->length());
-	get_fd_error(error_number, sbuf);
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: Frontend cached write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(bm > 0) bytes_moved += bm;
-	if(bm < 0 && error_number == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	  bm = bytes_moved;
-	  break;
-	}
-	if(bm < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error writing to Frontend socket";
-	    LogMessage(message.c_str());
-	    if(servercfg->debug && servercfg->debug_level >= 5) { 
-	      message << clear << "[" << seq_num << "]: Frontend write " << bm << " ERROR: " << error_number << ": " << sbuf;
-	      LogMessage(message.c_str());
-	    }
-	    error_level = 1;
-	    break;
-	  }
-	}
-	if(error_level != 0) break;
-	ptr = ptr->next;
-      }
-      if(error_level != 0) break;
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Frontend bytes moved: " << bytes_moved;
-	LogDebugMessage(message.c_str());
-      }
-      ptr = cache.GetHead();
-      while(ptr) {
-	delete ptr->data;
-	ptr->data = 0;
-	ptr = ptr->next;
-      }
-      cache.ClearList();
-    }
-    if(error_level != 0) break;
-    if(ready == 0) break;
-  }
-
-  ptr = cache.GetHead();
-  while(ptr) {
-    delete ptr->data;
-    ptr->data = 0;
-    ptr = ptr->next;
-  }
-  cache.ClearList();
-  delete buffer;
-  return error_level;
 }
 
 LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s)
@@ -888,6 +499,7 @@ LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> 
 	init_error = 1;
       }
       if(init_error == 0) {
+	SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
 	if(client->Connect() < 0) {
 	  if(servercfg->log_level >= 1) {
 	    sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot connect to backend host " 
@@ -1098,6 +710,7 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
       }
       return 0;
     }
+    SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
     if(client->Connect() < 0) {
       sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot connect to " 
 	   << ptr->data->hostname << " port " << ptr->data->port_number;
@@ -1200,6 +813,7 @@ LBnode *LBClientRequestThread::distrib(ClientSocket_t *s)
     }
     return round_robin(s, servercfg->distributed_rr_node_list);
   }
+  SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
   if(client->Connect() < 0) {
     sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name << " cannot connect to " 
 	 << limit_ptr->data.active_ptr->hostname << " port " << limit_ptr->data.active_ptr->port_number;
@@ -1307,6 +921,7 @@ LBnode *LBClientRequestThread::weighted(ClientSocket_t *s)
     }
     return round_robin(s, servercfg->weighted_rr_node_list);
   }
+  SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
   if(client->Connect() < 0) {
     sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name << " cannot connect to " 
 	 << limit_ptr->data.active_ptr->hostname << " port " << limit_ptr->data.active_ptr->port_number;

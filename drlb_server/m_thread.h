@@ -92,8 +92,6 @@ public:
   LBnode *assigned(ClientSocket_t *s);
   LBnode *distrib(ClientSocket_t *s);
   LBnode *weighted(ClientSocket_t *s);
-  int LB_ReadWrite(ClientSocket_t *s, int buffer_size);
-  int LB_CachedReadWrite(ClientSocket_t *s, int buffer_size);
 
 private:
   void *ThreadEntryRoutine(gxThread_t *thread);

@@ -189,10 +189,9 @@ struct LBconfig {
   int is_client_interactive;
   int check_config;
   int log_file_err;
-  int max_idle_count;
-  int idle_wait_secs;
-  int idle_wait_usecs;
-  int use_nonblock_sockets;
+  int write_timeout_secs;   // Max seconds a write may wait on a slow peer
+  int connect_timeout_secs; // Max seconds to connect to a backend node
+  int max_cache_size;       // Max bytes read from one side before a write
   int num_client_threads;
 
   // Log settings
@@ -327,7 +326,10 @@ void CfgGetEqualToParm(const gxString &cfgline, gxString &parm);
 int CfgGetTrueFalseValue(const gxString &cfgline);
 int CfgGetTrueFalseValue(const gxString &cfgline, gxString &parm);
 int CfgGetEqualToParm(const gxString &cfgline);
-char *CfgGetEqualToParm(const gxString &cfgline, char sbuf[255]);
+// 10/25/2026: Config lines are read into 1024 byte buffers, so a value
+// buffer must hold CFG_VALUE_SIZE bytes. Values are never truncated.
+const int CFG_VALUE_SIZE = 1024;
+char *CfgGetEqualToParm(const gxString &cfgline, char sbuf[CFG_VALUE_SIZE]);
 
 extern LBconfig ServerConfigSruct;
 extern LBconfig *servercfg;

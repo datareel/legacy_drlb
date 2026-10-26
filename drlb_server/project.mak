@@ -1,4 +1,4 @@
-PROJECT_DEP = m_thread.h drlb_server.h m_socket.h m_config.h m_log.h \
+PROJECT_DEP = m_relay.h m_thread.h drlb_server.h m_socket.h m_config.h m_log.h \
 m_proc.h m_help.h m_dbase.h m_app.h m_stats.h
 
 M_THREAD_DEP = $(PROJECT_DEP)
@@ -49,6 +49,9 @@ m_config$(OBJ_EXT):	m_config.cpp $(M_CONFIG_DEP)
 m_stats$(OBJ_EXT):	m_stats.cpp $(M_STATS_DEP)
 	$(CXX) $(COMPILE_ONLY) $(COMPILE_FLAGS) m_stats.cpp
 
+m_relay$(OBJ_EXT):	m_relay.cpp $(PROJECT_DEP)
+	$(CXX) $(COMPILE_ONLY) $(COMPILE_FLAGS) m_relay.cpp
+
 OBJECTS = $(PROJECT)$(OBJ_EXT) \
 m_thread$(OBJ_EXT) \
 m_socket$(OBJ_EXT) \
@@ -58,4 +61,5 @@ m_proc$(OBJ_EXT) \
 m_dbase$(OBJ_EXT) \
 m_app$(OBJ_EXT) \
 m_config$(OBJ_EXT) \
-m_stats$(OBJ_EXT)
+m_stats$(OBJ_EXT) \
+m_relay$(OBJ_EXT)

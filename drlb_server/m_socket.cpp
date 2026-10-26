@@ -55,14 +55,38 @@ int ip_to_hostname(const gxString &ip_str, gxString &hostname_str, gxString &err
     error_message << clear << gai_strerror(gai_result);
     return gai_result;
   }
-  if((gai_result = getnameinfo(result->ai_addr, result->ai_addrlen, hostname, NI_MAXHOST, NULL, 0, 0)) != 0) {  
+  if((gai_result = getnameinfo(result->ai_addr, result->ai_addrlen, hostname, NI_MAXHOST, NULL, 0, NI_NAMEREQD)) != 0) {  
     error_message << clear << gai_strerror(gai_result);
     freeaddrinfo(result);
     return gai_result;
   }
 
-  if(*hostname != '\0') hostname_str << clear << hostname;
   freeaddrinfo(result);
+  if(*hostname == '\0') return 0;
+
+  // 10/25/2026: Forward-confirm the reverse DNS name. Anyone who controls
+  // the reverse zone for their address can return any name, so a name is
+  // only used when one of its addresses is the client address.
+  struct addrinfo hints, *fwd, *rp;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_socktype = SOCK_STREAM;
+  if((gai_result = getaddrinfo(hostname, 0, &hints, &fwd)) != 0) {
+    error_message << clear << "forward lookup of " << hostname << " failed: " << gai_strerror(gai_result);
+    return gai_result;
+  }
+  int confirmed = 0;
+  for(rp = fwd; rp && !confirmed; rp = rp->ai_next) {
+    char addr[NI_MAXHOST];
+    if(getnameinfo(rp->ai_addr, rp->ai_addrlen, addr, sizeof(addr), NULL, 0, NI_NUMERICHOST) == 0) {
+      if(ip_str == addr) confirmed = 1;
+    }
+  }
+  freeaddrinfo(fwd);
+  if(!confirmed) {
+    error_message << clear << hostname << " does not resolve back to " << ip_str;
+    return EAI_NONAME;
+  }
+  hostname_str << clear << hostname;
   return 0;
 }
 
