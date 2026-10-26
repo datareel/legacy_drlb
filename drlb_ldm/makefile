@@ -19,8 +19,6 @@ install_root:
 	chmod 755 /etc/drlb
 	mkdir -pv /var/log/drlb
 	chmod 755 /var/log/drlb
-	mkdir -pv /var/run/drlb
-	chmod 755 /var/run/drlb
 	cp -fv drlb_ldm_server /usr/sbin/drlb_ldm_server
 	chmod 755 /usr/sbin/drlb_ldm_server
 	if [ ! -f /etc/drlb/ldm_cluster.cfg ]; then cp -fv ../etc/ldm_cluster.cfg  /etc/drlb/ldm_cluster.cfg; fi
@@ -29,13 +27,13 @@ install_root:
 	chmod 644 /etc/drlb/ldm_cluster_rules.cfg
 	if [ ! -f /etc/sysconfig/drlb_ldm_server ]; then cp -fv ../etc/drlb_ldm_server_sysconfig  /etc/sysconfig/drlb_ldm_server; fi
 	chmod 644 /etc/sysconfig/drlb_ldm_server
-	cp -fv ../system5_init/drlb_ldm_server /etc/rc.d/init.d/drlb_ldm_server
-	chmod 755 /etc/rc.d/init.d/drlb_ldm_server
-	if [ ! -d /etc/systemd/system ]; then chkconfig --add drlb_ldm_server; fi
-	if [ ! -d /etc/systemd/system ]; then chkconfig drlb_ldm_server off; fi
-	if [ -d /etc/systemd/system ]; then cp -fv ../systemd_init/drlb_ldm_server.service  /etc/systemd/system/drlb_ldm_server.service; fi
-	if [ -d /etc/systemd/system ]; then chmod 644 /etc/systemd/system/drlb_ldm_server.service; fi
-	if [ -d /etc/systemd/system ]; then systemctl daemon-reload; fi
+	mkdir -pv /usr/libexec/drlb
+	chmod 755 /usr/libexec/drlb
+	cp -fv ../systemd_init/drlb_platform_check /usr/libexec/drlb/drlb_platform_check
+	chmod 755 /usr/libexec/drlb/drlb_platform_check
+	cp -fv ../systemd_init/drlb_ldm_server.service /usr/lib/systemd/system/drlb_ldm_server.service
+	chmod 644 /usr/lib/systemd/system/drlb_ldm_server.service
+	systemctl daemon-reload
 	mkdir -p /usr/share/doc/drlb_ldm
 	chmod 755 /usr/share/doc/drlb_ldm
 	cp -fv ../README_drlb.txt /usr/share/doc/drlb_ldm/README.txt

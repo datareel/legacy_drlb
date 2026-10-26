@@ -1,17 +1,19 @@
 [Unit]
-Description=DRLB LDM service
-After=network.target
+Description=DataReel LDM load balancer
+Documentation=man:drlb_ldm_server(8)
+Wants=network-online.target
+After=network-online.target
 
 [Service]
+Type=simple
 LimitNOFILE=65535
-Type=forking
-EnvironmentFile=/etc/sysconfig/drlb_ldm_server
-ExecStart=/etc/rc.d/init.d/drlb_ldm_server start
-ExecReload=/etc/rc.d/init.d/drlb_ldm_server reload
-ExecStop=/etc/rc.d/init.d/drlb_ldm_server stop
-
-StandardOutput=syslog
-StandardError=syslog
+Environment=CFGFILE=/etc/drlb/ldm_cluster.cfg ARGS=
+EnvironmentFile=-/etc/sysconfig/drlb_ldm_server
+ExecStartPre=/usr/libexec/drlb/drlb_platform_check
+ExecStart=/usr/sbin/drlb_ldm_server --config-file=${CFGFILE} $ARGS
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

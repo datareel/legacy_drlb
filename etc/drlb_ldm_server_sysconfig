@@ -1,14 +1,11 @@
 # /etc/sysconfig/drlb_ldm_server
-# File used to override the init script VARs
+# Settings for the drlb_ldm_server systemd service
 
-# ARGS to pass to the drlb_lbm_server program
+# ARGS to pass to the drlb_ldm_server program
 ##ARGS=""
 
 # LB config file to use, if not default config
 ##CFGFILE="/etc/drlb/ldm_cluster.cfg"
 
-# Set to change the name of the server binary
-##LBPROCNAME="drlb_ldm_server"
-
-# Set to change the path to the server binary
-##LBPROC="/usr/sbin/${LBPROCNAME}"
+# Set to yes to skip the RHEL 8 NetworkManager and firewalld check
+##DRLB_SKIP_PLATFORM_CHECK=no
