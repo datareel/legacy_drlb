@@ -1,4 +1,4 @@
-README file for DRLB SSL Bridge
+README file for DRLB SSL Bridge 1.60 beta
 Last Modified: 10/25/2026
 
 Contents:
@@ -55,15 +55,15 @@ $ cd ${HOME}/git/ssl-bridge/rpm_builder
 
 RHEL 10:
 $ ./make_ssl_rpm_package.sh rhel10
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-<version>-1.el10.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-*.el10.x86_64.rpm
 
 RHEL 9:
 $ ./make_ssl_rpm_package.sh rhel9
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-<version>-1.el9.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-*.el9.x86_64.rpm
 
 RHEL 8 (NetworkManager and firewalld only):
 $ ./make_ssl_rpm_package.sh rhel8
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-<version>-1.el8.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-*.el8.x86_64.rpm
 
 Useful RPM command to verify package contents:
 
