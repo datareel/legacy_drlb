@@ -1,7 +1,7 @@
 BuildArch: x86_64
 Name: drlb_ldm_server
 Version: 1.64
-Release: 1.el10
+Release: 0.1.beta.el10
 Summary: Datareel LDM Load Balancer RPM
 Group: System Environment/Daemons
 License: GPL
@@ -68,7 +68,7 @@ fi
 
 %changelog
 * Mon Oct 26 2026 Datareel <datareel.com>
-- Version 1.64
+- Version 1.64 beta
 - Security fixes from the October 2026 review, new poll() based relay
 - LDM RPC filter checks every FEEDME, NOTIFYME, HIYA and HEREIS
 - DataReel 6.2 library update

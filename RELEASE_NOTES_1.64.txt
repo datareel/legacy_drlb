@@ -1,0 +1,48 @@
+DRLB LDM 1.64 beta release notes
+DRLB LDM load balancer, released 10/26/2026 as a beta
+
+This is a beta release. Test it before production use with your
+ldmd.conf and LDM clients.
+
+Platforms
+---------
+* RHEL 9 and RHEL 10 (and rebuilds). RHEL 8 only with NetworkManager and
+  firewalld running. RHEL 6 and RHEL 7 are no longer supported.
+* Native systemd units replace the System V init scripts. The servers
+  run as the drlb system user with systemd sandboxing.
+* Built with the DataReel 6.2 library. Only the DataReel files the
+  server uses are included.
+
+Security
+--------
+Fixes from the October 2026 security review, including: a heap overflow
+in the log queues, a connection flood that stopped the server, a signal
+handler that could deadlock or crash on shutdown, unbounded memory per
+connection, a busy loop on idle connections, missing timeouts, spoofable
+X-Forwarded-For headers, and reverse DNS names trusted without a forward
+check.
+
+Behavior changes (no backward compatibility settings)
+-----------------------------------------------------
+* New settings: write_timeout_secs, connect_timeout_secs,
+  max_cache_size and dead_node_secs. use_timeout = 1 by default.
+* max_idle_count, idle_wait_secs, idle_wait_usecs and
+  use_nonblock_sockets are removed. Default buffer_size is 65536.
+* Client X-Forwarded-For headers are replaced, not passed through.
+* SO_REUSEPORT is no longer set on the listening socket.
+* Round robin skips a node that refused a connection for
+  dead_node_secs and spreads its share over the live nodes.
+
+Testing
+-------
+python3 tests/ldm_tests.py runs the regression tests.
+
+LDM access control
+------------------
+* Every LDM 5 and 6 RPC message from a client is parsed and checked.
+  FEEDME and NOTIFYME need ALLOW entries covering every requested feed
+  type, HIYA needs ACCEPT entries, and every HEREIS and COMINGSOON
+  product must match an ACCEPT feed type and prodIdEre. Out of order or
+  unknown calls close the connection. Before, a host with only an ALLOW
+  entry could send products, and LDM 6 FEEDME requests were denied.
+* Protocol capture files go to /var/log/drlb/ldm_proto_capture.

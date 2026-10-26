@@ -1,4 +1,4 @@
-DataReel Load Balancer (DRLB) 1.X Readme File
+DataReel Load Balancer (DRLB) 1.60 beta Readme File
 DataReel Copyright (c) 2016-2026 DataReel Software Development
 
 Online docs:
@@ -169,15 +169,15 @@ $ cd ${HOME}/git/load-balancer/rpm_builder
 
 RHEL 10:
 $ ./make_rhel10_rpm.sh
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-<version>-1.el10.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-*.el10.x86_64.rpm
 
 RHEL 9:
 $ ./make_rhel9_rpm.sh
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-<version>-1.el9.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-*.el9.x86_64.rpm
 
 RHEL 8 (NetworkManager and firewalld only):
 $ ./make_rhel8_rpm.sh
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-<version>-1.el8.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-*.el8.x86_64.rpm
 
 Useful RPM command to verify package contents:
 

@@ -1,5 +1,5 @@
-README file for DRLB LDM server
-Last Modified: 11/18/2016
+README file for DRLB LDM server 1.64 beta
+Last Modified: 10/26/2026
 
 Contents:
 --------
@@ -56,15 +56,15 @@ $ cd ${HOME}/git/LDM-load-balancer/rpm_builder
 
 RHEL 10:
 $ ./make_ldm_rpm_package.sh rhel10
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ldm_server-<version>-1.el10.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ldm_server-*.el10.x86_64.rpm
 
 RHEL 9:
 $ ./make_ldm_rpm_package.sh rhel9
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ldm_server-<version>-1.el9.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ldm_server-*.el9.x86_64.rpm
 
 RHEL 8 (NetworkManager and firewalld only):
 $ ./make_ldm_rpm_package.sh rhel8
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ldm_server-<version>-1.el8.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ldm_server-*.el8.x86_64.rpm
 
 Useful RPM command to verify package contents:
 
