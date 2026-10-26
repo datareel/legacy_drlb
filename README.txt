@@ -6,6 +6,7 @@ Contents:
 * Overview
 * RPM Install
 * Building and Installing
+* Regression tests
 * Remaining work on this project
 * Support and Bug Tracking
 
@@ -154,6 +155,18 @@ To watch LB stats:
 To make the LB service persistent: 
 
 # systemctl enable drlb_ldm_server
+
+Regression tests
+----------------
+After building, run the regression tests from the top of the source
+tree. They start local test servers on 127.0.0.1 and need only Python 3
+(and the openssl command for the SSL bridge):
+
+$ python3 tests/ldm_tests.py
+
+The tests cover load balancing, fail over, timeouts, shutdown and the
+security fixes in this release. Each prints PASS or FAIL per check and
+exits non-zero if any check fails.
 
 Remaining work on this project
 ------------------------------

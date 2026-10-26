@@ -99,7 +99,7 @@ public:
   ~LdmFilter();
 
 public:
-  int Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, MemoryBuffer &out);
+  int Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, RelayBuffer &out);
 
 private:
   int check_record(ClientSocket_t *s, const unsigned char *p, unsigned len);
@@ -114,7 +114,7 @@ private:
   enum { LDM_START, LDM_FEEDING, LDM_ACCEPTING };
   int state;
   int blkdata_ok;          // Last COMINGSOON was accepted
-  MemoryBuffer pending;    // Frontend bytes held until a record can be checked
+  RelayBuffer pending;     // Frontend bytes held until a record can be checked
   unsigned frag_remaining; // Bytes of the current fragment still to pass
   int in_continuation;     // The current record has more fragments
   int capture_fd[2];       // Backend, frontend capture files

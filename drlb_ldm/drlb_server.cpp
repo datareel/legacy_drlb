@@ -157,7 +157,7 @@ int run_server()
     }
     if(servercfg->log_thread->GetThreadError() != gxTHREAD_NO_ERROR) {
       NT_print("ERROR - Fatal error starting log thread");
-      NT_print(servercfg->server_thread->ThreadExceptionMessage());
+      NT_print(servercfg->log_thread->ThreadExceptionMessage());
       return 1;
     }
   }
@@ -203,7 +203,7 @@ int run_server()
       }
       if(servercfg->stats_thread->GetThreadError() != gxTHREAD_NO_ERROR) {
 	NT_print("ERROR - Fatal error starting stats thread");
-	NT_print(servercfg->server_thread->ThreadExceptionMessage());
+	NT_print(servercfg->stats_thread->ThreadExceptionMessage());
 	return 1;
       }
     }

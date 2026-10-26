@@ -96,6 +96,7 @@ void *StatsThread::ThreadEntryRoutine(gxThread_t *thread)
     if(servercfg->debug && servercfg->debug_level >= 5) LogMessage("Generating DRLB stat report number");
     unsigned long total_runtime_connections = servercfg->CONNECTION_TOTAL();
     unsigned long elapsed_secs = etime - prev_etime;
+    if(elapsed_secs == 0) elapsed_secs = 1; // 10/25/2026: Avoid a divide by zero
     unsigned long server_connection_avg = 0;
     unsigned long node_connection_avg = 0.0;
     unsigned long node_current_connections = 0;

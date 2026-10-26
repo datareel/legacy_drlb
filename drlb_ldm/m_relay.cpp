@@ -49,6 +49,29 @@ missed data OpenSSL had already decrypted.
 #include "drlb_server.h"
 #include "m_relay.h"
 
+void RelayBuffer::Cat(const void *p, unsigned bytes)
+{
+  if(bytes == 0) return;
+  if(len + bytes > cap) {
+    unsigned ncap = cap ? cap : 4096;
+    while(ncap < len + bytes) ncap *= 2;
+    char *nbuf = new char[ncap];
+    if(len) memcpy(nbuf, buf, len);
+    delete[] buf;
+    buf = nbuf;
+    cap = ncap;
+  }
+  memcpy(buf + len, p, bytes);
+  len += bytes;
+}
+
+void RelayBuffer::DeleteFront(unsigned bytes)
+{
+  if(bytes >= len) { len = 0; return; }
+  memmove(buf, buf + bytes, len - bytes);
+  len -= bytes;
+}
+
 void SetSocketTimeouts(int fd, int send_secs, int recv_secs)
 {
   struct timeval tv;
@@ -157,7 +180,7 @@ int RelayWriteAll(RelaySide &side, const char *buf, int bytes, int timeout_secs)
 // Move one burst of data from src to dst.
 // Returns 0 to keep relaying, 1 if src closed, -1 on errors.
 static int relay_burst(ClientSocket_t *s, RelaySide &src, RelaySide &dst, char *buffer,
-		       int buffer_size, RelayFilter *filter, MemoryBuffer &out)
+		       int buffer_size, RelayFilter *filter, RelayBuffer &out)
 {
   gxString message;
   unsigned long burst = 0;
@@ -165,7 +188,7 @@ static int relay_burst(ClientSocket_t *s, RelaySide &src, RelaySide &dst, char *
   int closed = 0;
   int rv = 0;
 
-  out.Clear(0);
+  out.Clear();
   while(1) {
     int br = side_read(src, buffer, buffer_size);
     if(br == -2) break; // Nothing more ready
@@ -205,7 +228,7 @@ static int relay_burst(ClientSocket_t *s, RelaySide &src, RelaySide &dst, char *
   }
 
   if(out.length() > 0 && rv == 0) {
-    if(RelayWriteAll(dst, (const char *)out.m_buf(), out.length(), servercfg->write_timeout_secs) != 0) {
+    if(RelayWriteAll(dst, out.m_buf(), out.length(), servercfg->write_timeout_secs) != 0) {
       if(servercfg->log_level >= 3) {
 	message << clear << "[" << s->seq_num << "]: Error writing " << out.length() << " bytes to " << dst.name << " socket";
 	LogMessage(message.c_str());
@@ -217,7 +240,7 @@ static int relay_burst(ClientSocket_t *s, RelaySide &src, RelaySide &dst, char *
       LogDebugMessage(message.c_str());
     }
   }
-  out.Clear(0);
+  out.Clear();
 
   if(rv != 0) return rv;
   if(closed) {
@@ -235,7 +258,7 @@ int LB_Relay(ClientSocket_t *s, RelaySide &frontend, RelaySide &backend, int buf
   gxString message;
   if(buffer_size <= 0) buffer_size = 1500;
   char *buffer = new char[buffer_size];
-  MemoryBuffer out;
+  RelayBuffer out;
   int error_level = 0;
 
   set_nonblocking(frontend.fd, 1);
@@ -302,7 +325,7 @@ HttpForwardFilter::HttpForwardFilter()
   remaining = 0;
 }
 
-int HttpForwardFilter::Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, MemoryBuffer &out)
+int HttpForwardFilter::Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, RelayBuffer &out)
 {
   if(!from_frontend || state == HTTP_PASSTHRU) {
     out.Cat(buf, bytes);
@@ -320,17 +343,17 @@ int HttpForwardFilter::Filter(ClientSocket_t *s, int from_frontend, const char *
       const int max_header = 65536;
       while(pos < bytes) {
 	header.Cat(buf[pos++]);
-	__MEMBUF_INT__ hl = header.length();
-	if(hl >= 4 && memcmp((char *)header.m_buf() + hl - 4, "\r\n\r\n", 4) == 0) break;
-	if(hl >= (__MEMBUF_INT__)max_header) { // Not a request we can parse, stop inspecting
+	unsigned hl = header.length();
+	if(hl >= 4 && memcmp(header.m_buf() + hl - 4, "\r\n\r\n", 4) == 0) break;
+	if(hl >= (unsigned)max_header) { // Not a request we can parse, stop inspecting
 	  out.Cat(header.m_buf(), header.length());
-	  header.Clear(0);
+	  header.Clear();
 	  state = HTTP_PASSTHRU;
 	  break;
 	}
       }
-      __MEMBUF_INT__ hl = header.length();
-      if(state == HTTP_HEADER && hl >= 4 && memcmp((char *)header.m_buf() + hl - 4, "\r\n\r\n", 4) == 0) {
+      unsigned hl = header.length();
+      if(state == HTTP_HEADER && hl >= 4 && memcmp(header.m_buf() + hl - 4, "\r\n\r\n", 4) == 0) {
 	if(process_header(s, out) != 0) return 1;
       }
       continue;
@@ -349,7 +372,7 @@ static int header_name_is(const char *line, int len, const char *name)
   return strncasecmp(line, name, nlen) == 0;
 }
 
-int HttpForwardFilter::process_header(ClientSocket_t *s, MemoryBuffer &out)
+int HttpForwardFilter::process_header(ClientSocket_t *s, RelayBuffer &out)
 // Rewrite one complete request header and set up the body state.
 {
   const char *h = (const char *)header.m_buf();
@@ -369,7 +392,7 @@ int HttpForwardFilter::process_header(ClientSocket_t *s, MemoryBuffer &out)
     // Not HTTP/1.x, or a method we do not handle. Pass the rest of the
     // connection through unchanged.
     out.Cat(h, hl);
-    header.Clear(0);
+    header.Clear();
     state = HTTP_PASSTHRU;
     return 0;
   }
@@ -409,7 +432,7 @@ int HttpForwardFilter::process_header(ClientSocket_t *s, MemoryBuffer &out)
   gxString ff;
   ff << clear << servercfg->http_forward_for_str << ": " << s->client_name << "\r\n\r\n";
   out.Cat((void *)ff.c_str(), ff.length());
-  header.Clear(0);
+  header.Clear();
 
   if(upgrade || strncmp(h, "CONNECT ", 8) == 0) {
     state = HTTP_PASSTHRU; // WebSocket or tunnel, no more HTTP requests follow
@@ -428,7 +451,7 @@ int HttpForwardFilter::process_header(ClientSocket_t *s, MemoryBuffer &out)
   return 0;
 }
 
-int HttpForwardFilter::process_body(const char *buf, int bytes, int &used, MemoryBuffer &out)
+int HttpForwardFilter::process_body(const char *buf, int bytes, int &used, RelayBuffer &out)
 // Pass request body bytes and find where the next request starts.
 {
   used = 0;
@@ -437,7 +460,7 @@ int HttpForwardFilter::process_body(const char *buf, int bytes, int &used, Memor
     case HTTP_CHUNK_DATA: {
       unsigned long long n = remaining;
       if(n > (unsigned long long)bytes) n = bytes;
-      out.Cat(buf, (__MEMBUF_INT__)n);
+      out.Cat(buf, (unsigned)n);
       used = (int)n;
       remaining -= n;
       if(remaining == 0) state = (state == HTTP_BODY_LENGTH) ? HTTP_HEADER : HTTP_CHUNK_DATA_END;

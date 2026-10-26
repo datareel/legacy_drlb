@@ -703,7 +703,7 @@ void LdmFilter::capture(ClientSocket_t *s, int from_frontend, const char *buf, i
   }
 }
 
-int LdmFilter::Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, MemoryBuffer &out)
+int LdmFilter::Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, RelayBuffer &out)
 {
   capture(s, from_frontend, buf, bytes);
   if(!from_frontend) { // Data from the backend LDM server is passed as is
@@ -718,7 +718,7 @@ int LdmFilter::Filter(ClientSocket_t *s, int from_frontend, const char *buf, int
     if(frag_remaining > 0) { // Pass the rest of a checked fragment
       unsigned n = (frag_remaining < avail) ? frag_remaining : avail;
       out.Cat(p, n);
-      pending.DeleteAt(0, n);
+      pending.DeleteFront(n);
       frag_remaining -= n;
       continue;
     }
@@ -736,7 +736,7 @@ int LdmFilter::Filter(ClientSocket_t *s, int from_frontend, const char *buf, int
     }
     in_continuation = !last;
     out.Cat(p, 4);
-    pending.DeleteAt(0, 4);
+    pending.DeleteFront(4);
     frag_remaining = frag_len;
   }
   return 0;

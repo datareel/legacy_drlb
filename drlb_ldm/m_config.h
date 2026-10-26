@@ -225,6 +225,7 @@ struct LBconfig {
 
   gxList<LBnode *> distributed_rr_node_list;
   gxList<LBnode *> weighted_rr_node_list;
+  unsigned long rr_counter[3]; // Next round robin start: all, distributed, weighted nodes
   int refactor_scale;
   int build_distributed_rr_node_list();
   int refactor_distribution_limits(gxList<limit_node> &limit_node_list, int num_connections);
