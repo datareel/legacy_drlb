@@ -9,8 +9,6 @@ clean:
 
 clean_lib:
 	rm -fv ../lib/libdatareel_ssl.a
-	rm -fv ../lib/libdatareel_ssl.so
-	rm -fv ../lib/libdatareel_ssl.so.5.0
 
 install:
 	cp -fv drlb_ssl_server ../bin/drlb_ssl_server
