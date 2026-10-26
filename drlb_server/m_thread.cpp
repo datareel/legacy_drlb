@@ -520,17 +520,31 @@ LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> 
   if(&node_list == &servercfg->distributed_rr_node_list) counter = &servercfg->rr_counter[1];
   if(&node_list == &servercfg->weighted_rr_node_list) counter = &servercfg->rr_counter[2];
 
+  // 10/25/2026: Nodes that refused a connection are skipped for
+  // dead_node_secs, and the start node is picked among the live nodes,
+  // so a dead node's share is spread over all live nodes instead of
+  // going to the node after it.
+  LBnode **live = new LBnode *[num_nodes];
   unsigned retries = servercfg->retries;
   while(1) {
-    unsigned start = (unsigned)(__atomic_fetch_add(counter, 1UL, __ATOMIC_RELAXED) % num_nodes);
-    ptr = node_list.GetHead();
-    for(unsigned i = 0; i < start; i++) ptr = ptr->next;
-    for(unsigned tried = 0; tried < num_nodes; tried++) {
-      if(servercfg->check_node_max_clients(ptr->data, seq_num) == 0) {
-	if(connect_backend(s, ptr->data, "RR") == 0) return ptr->data;
+    time_t now = time(0);
+    unsigned num_live = 0;
+    for(ptr = node_list.GetHead(); ptr; ptr = ptr->next) {
+      if(ptr->data->down_until <= now) live[num_live++] = ptr->data;
+    }
+    if(num_live == 0) { // All nodes are marked down, try them all
+      for(ptr = node_list.GetHead(); ptr; ptr = ptr->next) live[num_live++] = ptr->data;
+    }
+    unsigned start = (unsigned)(__atomic_fetch_add(counter, 1UL, __ATOMIC_RELAXED) % num_live);
+    for(unsigned tried = 0; tried < num_live; tried++) {
+      LBnode *n = live[(start + tried) % num_live];
+      if(servercfg->check_node_max_clients(n, seq_num) != 0) continue;
+      if(connect_backend(s, n, "RR") == 0) {
+	n->down_until = 0;
+	delete[] live;
+	return n;
       }
-      ptr = ptr->next;
-      if(!ptr) ptr = node_list.GetHead();
+      if(servercfg->dead_node_secs > 0) n->down_until = time(0) + servercfg->dead_node_secs;
     }
     if(retries == 0) break;
     retries--;
@@ -538,6 +552,7 @@ LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> 
     LogMessage(sbuf.c_str());
     if(servercfg->retry_wait > 0) sSleep(servercfg->retry_wait);
   }
+  delete[] live;
 
   sbuf << clear << "[" << seq_num << "]: ERROR - All connection attempts failed";
   LogMessage(sbuf.c_str());

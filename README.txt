@@ -869,6 +869,12 @@ modify the following parameters in the [LBSERVER] section:
 ...
 retries = 3
 retry_wait = 1
+dead_node_secs = 1
+
+A node that refuses a connection is skipped for dead_node_secs
+seconds, and its share of new connections goes to the other nodes. If
+all nodes are marked down DRLB tries them all. Set dead_node_secs = 0
+to try every node on every connection.
 
 
 Buffer overflow settings
