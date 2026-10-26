@@ -1,5 +1,5 @@
 DataReel Load Balancer (DRLB) 1.X Readme File
-DataReel Copyright (c) 2016-2014 DataReel Software Development
+DataReel Copyright (c) 2016-2026 DataReel Software Development
 
 Online docs:
 http://datareel.com/info_drlb.html
@@ -11,6 +11,7 @@ Contents:
 --------
 * Overview
 * Features
+* Supported Platforms
 * Documented Usage
 * Building
 * RPM Install
@@ -18,6 +19,7 @@ Contents:
 * Building a default configuration file
 * Testing DRLB configurations files
 * Running DRLB as a service
+* Firewall Settings
 * Configuration Changes
 * Setting the listening port
 * Round robin configuration
@@ -88,6 +90,24 @@ Fetures
 * Buffer overflow detection: Option to detect buffer overflows for
   specific applications.
 
+Supported Platforms
+-------------------
+DRLB is built and tested on 64-bit Red Hat Enterprise Linux and RHEL
+rebuilds such as Rocky Linux and AlmaLinux:
+
+* RHEL 9 and RHEL 10: Fully supported.
+
+* RHEL 8: Limited support, only on systems that use NetworkManager and
+  firewalld. The legacy network-scripts (ifcfg network service) and
+  iptables services are not supported. The RHEL 8 RPM requires the
+  NetworkManager and firewalld packages, and the DRLB services check
+  that both are running before the server starts.
+
+* RHEL 7 and earlier: No longer supported.
+
+DRLB runs as a native systemd service. The System V init scripts used
+on RHEL 6 and RHEL 7 have been removed.
+
 Documented Usage
 ----------------
 * All commands prefixed with the $ prompt indicate the command is
@@ -123,7 +143,7 @@ port 8080 is used so the LB server can be started without root
 privileges. The default configuration file is documented with
 comments. A set of example config files in the etc directory:
 
-$ ls -l $HOME/git/datareel/load_balancer/etc
+$ ls -l $HOME/git/load-balancer/etc
 
 Once your configuration is set up, run a test with debug and logging
 enabled:
@@ -133,7 +153,11 @@ $ ./drlb_server --verbose --debug --config-file=/tmp/lb_test_config.cfg --log-fi
 RPM Install
 -----------
 System administrators, follow the instructions below to build an RPM
-for distribution:
+for distribution. Build each RPM on the RHEL version it is for, or in
+a matching UBI container, so the binary links with the right system
+libraries. The build needs the gcc-c++, make, and rpm-build packages:
+
+# dnf -y install gcc-c++ make rpm-build
 
 $ cd $HOME; mkdir -pv git; cd $HOME/git
 $ wget https://datareel.com/downloads/drlb/load-balancer-<version>.tar.gz
@@ -141,13 +165,17 @@ $ tar xzf load-balancer-<version>.tar.gz
 $ mv load-balancer-<version> load-balancer
 $ cd ${HOME}/git/load-balancer/rpm_builder
 
-RHEL7/CENTOS7:
-$ ./make_rhel7_rpm.sh
-$ sudo su root -c "yum -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-1.58-1.el7.x86_64.x86_64.rpm"
+RHEL 10:
+$ ./make_rhel10_rpm.sh
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-<version>-1.el10.x86_64.rpm
 
-RHEL6/CENTOS6:
-$ ./make_rhel6_rpm.sh
-sudo su root -c "yum -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-1.58-1.el6.x86_64.x86_64.rpm"
+RHEL 9:
+$ ./make_rhel9_rpm.sh
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-<version>-1.el9.x86_64.rpm
+
+RHEL 8 (NetworkManager and firewalld only):
+$ ./make_rhel8_rpm.sh
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_server-<version>-1.el8.x86_64.rpm
 
 Useful RPM command to verify package contents:
 
@@ -158,15 +186,15 @@ List docs: rpm -qd drlb_server
 
 To remove package:
 
-$ sudo su root -c "yum -y remove drlb_server"
+$ sudo dnf -y remove drlb_server
 
 Installing from src build
 -------------------------
-The development version can be installed on CENTOS6/RHEL6 or
-CENTOS7/RHEL7 from the makefile:
+The development version can be installed on RHEL 9, RHEL 10, or RHEL 8
+with NetworkManager and firewalld, from the makefile:
 
-$ cd $HOME/git/datareel/load_balancer/drlb_server
-$ sudo su root -c 'make install_root'
+$ cd $HOME/git/load-balancer/drlb_server
+$ sudo make install_root
 
 Building a default configuration file
 -------------------------------------
@@ -221,63 +249,79 @@ defaults, edit the following file:
 
 # vi /etc/sysconfig/drlb_server
 
-# File used to override the init script VARs
-
-# Set to change the name of the server binary
-##LBPROCNAME="drlb_server"
-
 # Set to change the path to the server binary
-##LBPROC="/usr/sbin/${LBPROCNAME}"
+##LBPROC="/usr/sbin/drlb_server"
 
 # Set to change location of active config list
 ##ACTIVE_CONFIGS="/etc/drlb/active_configs.list"
 
 # NOTE: Set for single config if you wish to run only on LB server
-###SINGLECONFIG=/etc/drlb/http_rr_test.cfg
+##SINGLECONFIG=/etc/drlb/http_rr_test.cfg
+
+# Seconds to wait for each LB server to stop before it is killed
+##STOP_TIMEOUT=15
+
+# Set to yes to skip the RHEL 8 NetworkManager and firewalld check
+##DRLB_SKIP_PLATFORM_CHECK=no
 
 After setting up your DRLB configuration files and your active
 configuration list, start the DRLB server and make the DRLB service
 persistent:
 
-RHEL 7/CENTOS 7:
-
 # systemctl start drlb_server
 # systemctl status drlb_server
 # systemctl enable drlb_server
 
-RHEL 6/CENTOS 6:
+Each configuration can also run as its own service with the
+drlb_server@ template. The instance name is the configuration file
+name in /etc/drlb without the .cfg extension. A configuration run this
+way restarts on failure and can be restarted without stopping the
+others. Do not list it in /etc/drlb/active_configs.list as well:
 
-# service drlb_server start
-# service drlb_server status
-# chkconfig drlb_server on
+# systemctl enable --now drlb_server@http_rr_test
+# systemctl status drlb_server@http_rr_test
+
+Server messages go to the systemd journal:
+
+# journalctl -u drlb_server
+# journalctl -u drlb_server@http_rr_test
+
+Firewall Settings
+-----------------
+DRLB uses firewalld. iptables service rules are not supported. Open
+the front end listening port set in the [LBSERVER] section of each
+configuration, for example port 8080:
+
+# firewall-cmd --permanent --add-port=8080/tcp
+# firewall-cmd --reload
+# firewall-cmd --list-ports
+
+To limit access to a set of client networks, use a rich rule in place
+of the open port:
+
+# firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.122.0/24" port port="8080" protocol="tcp" accept'
+# firewall-cmd --reload
+
+On each back end server, open the back end port to the DRLB server
+address only.
 
 Configuration Changes
 ---------------------
 All changes to a DRLB configuration file or assignment rules will
 require a server restart:
 
-RHEL 7/CENTOS 7:
-
 # systemctl restart drlb_server
 
-RHEL 6/CENTOS 6:
-
-# service drlb_server restart
-
 For DRLB configurations running more than one LB server you can
-manually restart the each server instance:
+restart a single configuration with the control script:
 
-# ps -ef | grep drlb_server | grep -v grep
+# /usr/libexec/drlb/drlb_server_ctl status
+# /usr/libexec/drlb/drlb_server_ctl restart /etc/drlb/http_rr_test.cfg
 
-root 17058 1 0 23:57 ? 00:00:00 /usr/sbin/drlb_server --config-file=/etc/drlb/http_rr_test.cfg
-root 17075 1 0 23:57 ? 00:00:00 /usr/sbin/drlb_server --config-file=/etc/drlb/ldm_cluster.cfg
+A configuration that runs as a drlb_server@ service is restarted with
+systemctl:
 
-In the example above you can restart only the http_rr_test.cfg
-instance by manually stopping and starting process ID 17058:
-
-# kill  17058
-# /usr/sbin/drlb_server –config-file=/etc/drlb/http_rr_test.cfg &
-# ps -ef | grep drlb_server | grep -v grep
+# systemctl restart drlb_server@http_rr_test
 
 Setting the listening port
 --------------------------
@@ -949,47 +993,45 @@ thoroughly tested on development servers whenever possible. If you are
 not careful when adjusting default limits you can render your server
 inoperable.
 
-In RHEL6/CENTOS6 and RHEL7/CENTOS7 the default number of file,
-including sockets, is 1024. For load balancer applications with a high
-volume of connections you will need to increase the default value.
+On RHEL 8, 9, and 10 the default soft limit for open files, including
+sockets, is 1024. For load balancer applications with a high volume
+of connections you will need to increase the default value.
 
-For RHEL7/CENTOS7, the global ulimit for nofiles is ignored for
-systemd services. The nofile limit is now set in the service file:
-
-# more /etc/systemd/system/drlb_server.service
+The global ulimit for nofiles in /etc/security/limits.conf is ignored
+for systemd services. The DRLB service files set the limit:
 
 [Service]
 LimitNOFILE=65535
 
-For RHEL7/CENTOS7 runtime testing you can change the nofile limit for
-a process using the prlimit command:
+To change the limit, use a drop-in file so RPM updates keep your
+setting:
 
-# ps -ef | grep drlb_server | grep -v grep
+# systemctl edit drlb_server
+
+[Service]
+LimitNOFILE=262144
+
+# systemctl restart drlb_server
+
+For runtime testing you can change the nofile limit for a process
+using the prlimit command:
+
+# pgrep -a drlb_server
 # prlimit --pid [pid] --nofile=32767:65535
 
-For RHEL6/CENTOS6, you can increase the max number of open files by
-increasing the ulimit value:
-
-# vi /etc/security/limits.d/nofile.conf
-
-*    soft    nofile 32767
-*    hard    nofile 65535
-
-This change will require a reboot.
-
-For RHEL6/CENTOS6 runtime testing you can manually set the nofile
-limits and start the DRLB server the same shell:
+When you run the DRLB server from a shell for testing, set the limits
+in the same shell before starting the server:
 
 # ulimit -n 32767
 # ulimit -H -n 65535
 
 To check the file limits for the DRLB process(es):
 
-# pids=$(ps -ef | grep drlb_server | grep -v grep | awk '{ print $2 }')
+# pids=$(pgrep drlb_server)
 # for p in $pids; do cat /proc/$p/limits | grep -i file; done
 
-The Max open files setting should match your ulimit settings for soft
-and hard limits. To see how many files the process(es) have open:
+The Max open files setting should match your settings for soft and
+hard limits. To see how many files the process(es) have open:
 
 # for p in $pids; do ls -l --color=none /proc/$p/fd; done
 
@@ -1015,19 +1057,13 @@ orginal settings before making any changes, for example:
 
 # sysctl fs.file-max | tee -a /root/sysctl_org_settings.txt
 
-To make the changes persistent, add the setting(s) to the sysctl.conf
-file:
+To make the changes persistent, add the setting(s) to a file in
+/etc/sysctl.d:
 
-CENTOS 5/6 or RHEL 5/6:
-# vi /etc/sysctl.conf
-
-CENTOS 7 or RHEL 7:
 # vi /etc/sysctl.d/01-lb.conf
 
-To load changes CENTOS 5/6 or RHEL 5/6:
-# sysctl -p
+To load changes:
 
-To load changes CENTOS 7 or RHEL 7:
 # sysctl -p /etc/sysctl.d/01-lb.conf
 
 File Handle Limits:
@@ -1038,10 +1074,10 @@ fs.file-max = 25000000
 
 IPv4 Socket Tuning:
 ------------------
-For a large numbers of concurent sessions:
+For a large numbers of concurent sessions. NOTE: net.ipv4.tcp_tw_recycle
+was removed from the Linux kernel and must not be set:
 
 net.ipv4.ip_local_port_range = 1024 65535
-net.ipv4.tcp_tw_recycle = 1
 net.ipv4.tcp_tw_reuse = 1
 net.ipv4.tcp_fin_timeout = 60
 net.core.rmem_max = 16777216
@@ -1059,13 +1095,14 @@ net.ipv4.ip_nonlocal_bind=1
 Process Scheduler:
 -----------------
 Increase time for process run time before the kernel will consider
-migrating it again to another core: 
+migrating it again to another core. On RHEL 9 and RHEL 10 this
+setting moved from sysctl to debugfs:
 
-CENTOS 5/6 or RHEL 5/6:
-kernel.sched_migration_cost = 5000000
-
-CENTOS 7 or RHEL 7:
+RHEL 8:
 kernel.sched_migration_cost_ns = 5000000
+
+RHEL 9 and RHEL 10:
+# echo 5000000 > /sys/kernel/debug/sched/migration_cost_ns
 
 kernel.sched_autogroup_enabled = 0
 
@@ -1084,7 +1121,7 @@ machines. Once you have Apache running on a one or more virtual
 machines copy the following PHP scripts to the Web root on each VM,
 for example
 
-$ cd $HOME/git/datareel/load_balancer/apache_test
+$ cd $HOME/git/load-balancer/apache_test
 $ chmod 644 *.php
 
 $ for s in 192.168.122.111 192.168.122.112 192.168.122.113
@@ -1093,7 +1130,7 @@ $ for s in 192.168.122.111 192.168.122.112 192.168.122.113
 > scp -p *.php username@${s}:/var/www/html/.
 > done
 
-$ cd $HOME/git/datareel/load_balancer/drlb_server
+$ cd $HOME/git/load-balancer/drlb_server
 $ ./drlb_server --config-file=../etc/http_rr_test.cfg --log-file=/tmp/http_rr.log > /tmp/drlb_start.log &
 
 To connect using wget, assuming the DRLB server is listening on port

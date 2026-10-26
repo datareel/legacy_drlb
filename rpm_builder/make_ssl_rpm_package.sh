@@ -5,11 +5,16 @@ BUILDDIR_tmp="/tmp/drlb_ssl_build_${USERNAME}"
 
 if [ -z $1 ]; then
     echo "You must supply a OS version"
-    echo "Usage: ${0} rhel6|rhel7|rhel8|rhel9"
+    echo "Usage: ${0} rhel8|rhel9|rhel10"
     exit 1
 fi
 
 OS=${1,,}
+
+case "${OS}" in
+    rhel8|rhel9|rhel10) ;;
+    *) echo "ERROR - Unsupported OS version: ${1}. Use rhel8, rhel9, or rhel10"; exit 1 ;;
+esac
 
 if [ ! -z "${2}" ]; then BUILDDIR_tmp="${2}"; fi
  
@@ -51,7 +56,7 @@ if [ ! -d "${Build}" ]; then
     exit 1;
 fi
 
-source ../../env/gnu_env.sh
+source ../env/gnu_env.sh
 cd ../ssl_bridge
 make clean_lib
 make clean
@@ -61,8 +66,6 @@ mkdir -p ${Build}/etc/drlb
 chmod 755 ${Build}/etc/drlb
 mkdir -p ${Build}/var/log/drlb
 chmod 755 ${Build}/var/log/drlb
-mkdir -p ${Build}/var/run/drlb
-chmod 755 ${Build}/var/run/drlb
 mkdir -p ${Build}/etc/drlb/ssl/private 
 chmod -R 700 ${Build}/etc/drlb/ssl/private
 mkdir -p ${Build}/etc/drlb/ssl/certs
@@ -77,10 +80,10 @@ mkdir -p ${Build}/etc/sysconfig
 chmod 755 ${Build}/etc/sysconfig
 cp -f ../etc/drlb_ssl_server_sysconfig  ${Build}/etc/sysconfig/drlb_ssl_server
 chmod 644 ${Build}/etc/sysconfig/drlb_ssl_server
-mkdir -p ${Build}/etc/rc.d/init.d
-chmod 755 ${Build}/etc/rc.d/init.d
-cp -f ../system5_init/drlb_ssl_server ${Build}/etc/rc.d/init.d/drlb_ssl_server
-chmod 755 ${Build}/etc/rc.d/init.d/drlb_ssl_server
+mkdir -p ${Build}/usr/libexec/drlb
+chmod 755 ${Build}/usr/libexec/drlb
+cp -fv ../systemd_init/drlb_platform_check ${Build}/usr/libexec/drlb/drlb_platform_check
+chmod 755 ${Build}/usr/libexec/drlb/drlb_platform_check
 mkdir -p ${Build}/usr/share/doc/drlb_ssl_bridge
 chmod 755 ${Build}/usr/share/doc/drlb_ssl_bridge
 cp -f ../README_drlb.txt ${Build}/usr/share/doc/drlb_ssl_bridge/README.txt
@@ -95,12 +98,10 @@ mkdir -p ${Build}/usr/share/man/man8
 chmod 755 ${Build}/usr/share/man/man8
 gzip -c ../man/drlb_ssl_server.8 > ${Build}/usr/share/man/man8/drlb_ssl_server.8.gz
 chmod 644  ${Build}/usr/share/man/man8/drlb_ssl_server.8.gz
-if [ "${OS}" == "rhel7" ] || [ "${OS}" == "rhel8" ] || [ "${OS}" == "rhel9" ]; then
-    mkdir -p ${Build}/etc/systemd/system
-    chmod 755 ${Build}/etc/systemd/system
-    cp -f ../systemd_init/drlb_ssl_server.service  ${Build}/etc/systemd/system/drlb_ssl_server.service
-    chmod 644 ${Build}/etc/systemd/system/drlb_ssl_server.service
-fi
+mkdir -p ${Build}/usr/lib/systemd/system
+chmod 755 ${Build}/usr/lib/systemd/system
+cp -fv ../systemd_init/drlb_ssl_server.service ${Build}/usr/lib/systemd/system/drlb_ssl_server.service
+chmod 644 ${Build}/usr/lib/systemd/system/drlb_ssl_server.service
 
 cd ${Build}
 if [ -f ${HOME}/rpmbuild/BUILD/drlb_ssl_server.tar.gz ]; then

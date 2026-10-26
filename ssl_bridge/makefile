@@ -19,8 +19,6 @@ install_root:
 	chmod 755 /etc/drlb
 	mkdir -pv /var/log/drlb
 	chmod 755 /var/log/drlb
-	mkdir -pv /var/run/drlb
-	chmod 755 /var/run/drlb
 	mkdir -pv /etc/drlb/ssl/private /etc/drlb/ssl/certs
 	chmod -R 755 /etc/drlb/ssl/private /etc/drlb/ssl/certs
 	cp -fv drlb_ssl_server /usr/sbin/drlb_ssl_server
@@ -29,13 +27,13 @@ install_root:
 	chmod 644 /etc/drlb/ssl_bridge.cfg
 	if [ ! -f /etc/sysconfig/drlb_ssl_server ]; then cp -fv ../etc/drlb_ssl_server_sysconfig  /etc/sysconfig/drlb_ssl_server; fi
 	chmod 644 /etc/sysconfig/drlb_ssl_server
-	cp -fv ../system5_init/drlb_ssl_server /etc/rc.d/init.d/drlb_ssl_server
-	chmod 755 /etc/rc.d/init.d/drlb_ssl_server
-	if [ ! -d /etc/systemd/system ]; then chkconfig --add drlb_ssl_server; fi
-	if [ ! -d /etc/systemd/system ]; then chkconfig drlb_ssl_server off; fi
-	if [ -d /etc/systemd/system ]; then cp -fv ../systemd_init/drlb_ssl_server.service  /etc/systemd/system/drlb_ssl_server.service; fi
-	if [ -d /etc/systemd/system ]; then chmod 644 /etc/systemd/system/drlb_ssl_server.service; fi
-	if [ -d /etc/systemd/system ]; then systemctl daemon-reload; fi
+	mkdir -pv /usr/libexec/drlb
+	chmod 755 /usr/libexec/drlb
+	cp -fv ../systemd_init/drlb_platform_check /usr/libexec/drlb/drlb_platform_check
+	chmod 755 /usr/libexec/drlb/drlb_platform_check
+	cp -fv ../systemd_init/drlb_ssl_server.service /usr/lib/systemd/system/drlb_ssl_server.service
+	chmod 644 /usr/lib/systemd/system/drlb_ssl_server.service
+	systemctl daemon-reload
 	mkdir -p /usr/share/doc/drlb_ssl_bridge
 	chmod 755 /usr/share/doc/drlb_ssl_bridge
 	cp -fv ../README_drlb.txt /usr/share/doc/drlb_ssl_bridge/README.txt

@@ -39,7 +39,12 @@ existing web configurations with having to be reconfigured to run SSL.
 RPM Install
 -----------
 System administrators, follow the instructions below to build an RPM
-for distribution:
+for distribution. Build each RPM on the RHEL version it is for, or in
+a matching UBI container. RHEL 9 and RHEL 10 are supported. RHEL 8 is
+supported only with NetworkManager and firewalld. RHEL 6 and RHEL 7
+are no longer supported. The build needs these packages:
+
+# dnf -y install gcc-c++ make rpm-build openssl-devel
 
 $ cd $HOME; mkdir -pv git; cd $HOME/git
 $ wget https://datareel.com/downloads/drlb/ssl-bridge-<version>.tar.gz
@@ -47,13 +52,17 @@ $ tar xzf ssl-bridge-<version>.tar.gz
 $ mv ssl-bridge-<version> ssl-bridge
 $ cd ${HOME}/git/ssl-bridge/rpm_builder
 
-RHEL7/CENTOS7:
-$ ./make_ssl_rpm_package.sh rhel7
-$ sudo su root -c "yum -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-1.58-1.el7.x86_64.x86_64.rpm"
+RHEL 10:
+$ ./make_ssl_rpm_package.sh rhel10
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-<version>-1.el10.x86_64.rpm
 
-RHEL6/CENTOS6:
-$ ./make_ssl_rpm_package.sh rhel6
-$ sudo su root -c "yum -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-1.58-1.el6.x86_64.x86_64.rpm"
+RHEL 9:
+$ ./make_ssl_rpm_package.sh rhel9
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-<version>-1.el9.x86_64.rpm
+
+RHEL 8 (NetworkManager and firewalld only):
+$ ./make_ssl_rpm_package.sh rhel8
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-<version>-1.el8.x86_64.rpm
 
 Useful RPM command to verify package contents:
 
@@ -64,7 +73,7 @@ List docs: rpm -qd drlb_ssl_server
 
 To remove package:
 
-$ sudo su root -c "yum -y remove drlb_ssl_server"
+$ sudo dnf -y remove drlb_ssl_server
 
 Building and installing from source
 -----------------------------------
@@ -80,7 +89,7 @@ $ mv ssl-bridge-<version> ssl-bridge
 $ source $HOME/git/ssl-bridge/env/gnu_env.sh
 $ cd $HOME/git/ssl-bridge/ssl_bridge
 $ make
-$ sudo su root -c 'make install_root'
+$ sudo make install_root
 
 Setting up the SSL bridge service
 ---------------------------------
@@ -122,15 +131,12 @@ The default LB scheme used with the SSL bridge is round robin.
 After setting up your LB and SSL config, start the
 service:
 
-RHEL 7/CENTOS 7:
-
 # systemctl start drlb_ssl_server
 # systemctl status drlb_ssl_server
 
-RHEL 6/CENTOS 6:
+Server messages go to the systemd journal:
 
-# service drlb_ssl_server start
-# service drlb_ssl_server status
+# journalctl -u drlb_ssl_server
 
 To watch the log file:
 
@@ -142,13 +148,7 @@ To watch LB stats:
 
 To make the LB service persistent: 
 
-RHEL 7/CENTOS 7:
-
 # systemctl enable drlb_ssl_server
-
-RHEL 6/CENTOS 6:
-
-# chkconfig drlb_ssl_server on
 
 SSL certificates
 ----------------

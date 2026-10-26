@@ -1,25 +1,20 @@
 BuildArch: x86_64
 Name: drlb_ssl_server
-Version: 1.59        
-Release: 1.el8.x86_64
+Version: 1.59
+Release: 1.el8
 Summary: Datareel SSL Load Balancer RPM
 Group: System Environment/Daemons
-License: GPL       
+License: GPL
 Distribution: Datareel Open Source
-URL: http://datareel.com/drlb/ssl.html
+URL: https://datareel.com/drlb/ssl.html
 Vendor: Datareel Open Source
-
 Requires: openssl-libs
-Requires: openssl
-Requires: libpthread.so.0()(64bit)
-Requires: libstdc++.so.6()(64bit)
-Requires: libm.so.6()(64bit)
-Requires: libgcc_s.so.1()(64bit)
-Requires: libc.so.6()(64bit)
-Requires: ld-linux-x86-64.so.2()(64bit)
-Requires: systemd-units  
-Requires: /bin/sh  
-Requires: /bin/bash
+Requires: systemd
+Requires: bash
+# RHEL 8 is supported only with NetworkManager and firewalld
+Requires: NetworkManager
+Requires: firewalld
+Conflicts: network-scripts
 
 %description
 DataReel load balancer (DRLB) for SSL protocol.
@@ -28,21 +23,21 @@ DataReel load balancer (DRLB) for SSL protocol.
 tar xvf drlb_ssl_server.tar.gz -C $RPM_BUILD_ROOT
 
 %files
-%config(noreplace) %dir %attr(0755, root, root) "/etc/drlb"
+%dir %attr(0755, root, root) "/etc/drlb"
 %dir %attr(0700, root, root) "/etc/drlb/ssl/private"
 %dir %attr(0755, root, root) "/etc/drlb/ssl/certs"
 %dir %attr(0755, root, root) "/var/log/drlb"
-%dir %attr(0755, root, root) "/var/run/drlb"
 %attr(0755, root, root) "/usr/sbin/drlb_ssl_server"
-%config %attr(0644, root, root) "/etc/sysconfig/drlb_ssl_server"
+%config(noreplace) %attr(0644, root, root) "/etc/sysconfig/drlb_ssl_server"
 %config(noreplace) %attr(0644, root, root) "/etc/drlb/ssl_bridge.cfg"
-%config %attr(0755, root, root) "/etc/rc.d/init.d/drlb_ssl_server"
 %doc %attr(0644, root, root) "/usr/share/doc/drlb_ssl_bridge/README.txt"
 %doc %attr(0644, root, root) "/usr/share/doc/drlb_ssl_bridge/README_ssl.txt"
 %doc %attr(0644, root, root) "/usr/share/doc/drlb_ssl_bridge/COPYING"
 %doc %attr(0644, root, root) "/usr/share/doc/drlb_ssl_bridge/version.txt"
 %doc %attr(0644, root, root) "/usr/share/man/man8/drlb_ssl_server.8.gz"
-%config %attr(0644, root, root) "/etc/systemd/system/drlb_ssl_server.service"
+%attr(0644, root, root) "/usr/lib/systemd/system/drlb_ssl_server.service"
+%dir %attr(0755, root, root) "/usr/libexec/drlb"
+%attr(0755, root, root) "/usr/libexec/drlb/drlb_platform_check"
 
 %post -p /bin/sh
 
@@ -68,9 +63,14 @@ if [ $1 -ge 1 ] ; then
 fi
 
 %changelog
+* Sun Oct 25 2026 Datareel <datareel.com>
+- DataReel 6.2 library update
+- RHEL 9 and RHEL 10 builds; RHEL 8 only with NetworkManager and firewalld
+- RHEL 6 and RHEL 7 support removed
+- Native systemd units in /usr/lib/systemd/system, SysV init script removed
 * Tue Feb 06 2024 Datareel <datareel.com>
 - Updates for RHEL 8 and RHEL 9 builds
 * Wed Oct 19 2016 Datareel <datareel.com>
 - Fix for potential ABRT exit from safe_close call on closed file descriptor
 * Sun Oct 10 2016 Datareel <datareel.com>
-- Initial RPM build 
+- Initial RPM build
