@@ -552,6 +552,12 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
   if(servercfg->enable_http_forwarding) filter = &http_filter;
   LB_Relay(s, frontend, backend, n->buffer_size, filter);
 
+  // 10/25/2026: Send TLS close_notify before closing the sockets. Without
+  // it OpenSSL 3 clients report "unexpected eof while reading" and treat
+  // the response as truncated.
+  if(frontend.ssl) SSL_shutdown(frontend.ssl);
+  if(backend.ssl) SSL_shutdown(backend.ssl);
+
   shutdown(s->client_socket, SHUT_RDWR);
   shutdown(s->client.GetSocket(), SHUT_RDWR);
 
