@@ -1,7 +1,7 @@
 BuildArch: x86_64
 Name: drlb_server
 Version: 1.60
-Release: 1.el8
+Release: 0.1.beta.el8
 Summary: Datareel Load Balancer RPM
 Group: System Environment/Daemons
 License: GPL
@@ -74,7 +74,7 @@ fi
 
 %changelog
 * Mon Oct 26 2026 Datareel <datareel.com>
-- Version 1.60
+- Version 1.60 beta
 - Security fixes from the October 2026 review, new poll() based relay
 - DataReel 6.2 library update
 - RHEL 9 and RHEL 10 builds; RHEL 8 only with NetworkManager and firewalld
