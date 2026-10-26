@@ -41,18 +41,16 @@ SSL config for DR load balancer.
 int init_ssl_cert()
 {
   gxSSL *ssl = &sslcfg->openssl;
-  int error_level = 0;
+  gxString sbuf;
 
   if(!futils_exists(sslcfg->ssl_key_file.c_str())) {
     NT_print("ERROR - Missing private key:", sslcfg->ssl_key_file.c_str());
     return 1;
   }
-
   if(!futils_exists(sslcfg->ssl_cert_file.c_str())) {
-    NT_print("ERROR - Missing SSL cert:", sslcfg->ssl_key_file.c_str());
+    NT_print("ERROR - Missing SSL cert:", sslcfg->ssl_cert_file.c_str());
     return 1;
   }
-  
   if(sslcfg->ssl_use_dhparms) {
     if(!futils_exists(sslcfg->ssl_dhparms_file.c_str())) {
       NT_print("ERROR - Missing dhparms file:", sslcfg->ssl_dhparms_file.c_str());
@@ -60,117 +58,116 @@ int init_ssl_cert()
     }
   }
 
-  char hexbuf[255];
-  memset(hexbuf, 0, 255);
-  // OPENSSL_VERSION_NUMBER = 0xnnnnnnnnnL
-  sprintf(hexbuf, "0x%09lx", (unsigned long)OPENSSL_VERSION_NUMBER & 0xFFFFFFFFF);
-  NT_print("Open SSl version:", hexbuf);
+  NT_print("OpenSSL version:", OpenSSL_version(OPENSSL_VERSION));
 
+  // 10/25/2026: Only TLS 1.2 and TLS 1.3. SSLv2, SSLv3, TLS 1.0, TLS 1.1
+  // and DTLS are no longer accepted.
   sslcfg->ssl_protocol.ToUpper();
-  if(sslcfg->ssl_protocol == "SSLV2") {
-    sslcfg->meth = gxSSL_SSLv2;
-    NT_print("SSL config set to use protocol SSLv2"); 
-  }
-  if(sslcfg->ssl_protocol == "SSLV23") {
-    sslcfg->meth = gxSSL_SSLv23;
-    NT_print("SSL config set to use protocol SSLv23"); 
-  }
-  if(sslcfg->ssl_protocol == "SSLV3") {
-    sslcfg->meth = gxSSL_SSLv3;
-    NT_print("SSL config set to use protocol SSLv3"); 
-  }
-  if(sslcfg->ssl_protocol == "TLSV1") {
-    sslcfg->meth = gxSSL_TLSv1;
-    NT_print("SSL config set to use protocol TLSv1"); 
-  }
   if(sslcfg->ssl_protocol == "TLS") {
     sslcfg->meth = gxSSL_TLS;
-    NT_print("SSL config set to use protocol TLS"); 
+    NT_print("SSL connections will use TLS 1.2 or TLS 1.3"); 
   }
-  if(sslcfg->ssl_protocol == "TLSV1_1") {
-    sslcfg->meth = gxSSL_TLSv1_1;
-    NT_print("SSL config set to use protocol TLSv1_1"); 
-  }
-  if(sslcfg->ssl_protocol == "TLSV1_2") {
+  else if(sslcfg->ssl_protocol == "TLSV1_2") {
     sslcfg->meth = gxSSL_TLSv1_2;
-    NT_print("SSL config set to use protocol TLSv1_2"); 
+    NT_print("SSL connections will only use TLS 1.2"); 
   }
-  if(sslcfg->ssl_protocol == "DTLS") {
-    sslcfg->meth = gxSSL_DTLS;
-    NT_print("SSL config set to use protocol DTLS"); 
+  else if(sslcfg->ssl_protocol == "TLSV1_3") {
+    sslcfg->meth = gxSSL_TLSv1_3;
+    NT_print("SSL connections will only use TLS 1.3"); 
   }
-  if(sslcfg->ssl_protocol == "DTLSV1") {
-    sslcfg->meth = gxSSL_DTLSv1;
-    NT_print("SSL config set to use protocol DTLSv1"); 
-  }
-  if(sslcfg->ssl_protocol == "DTLSV1_2") {
-    sslcfg->meth = gxSSL_DTLSv1_2;
-    NT_print("SSL config set to use protocol DTLSv1_2"); 
-  }
-
-  ssl->SetSSLProto(sslcfg->meth);
-  if(!gxSSL::InitSSLibrary()) {
-    NT_print("ERROR - Cannot initializing SSL library");
-    if(servercfg->debug) NT_print(ssl->SSLExceptionMessage());
+  else {
+    NT_print("ERROR - Unsupported ssl_protocol:", sslcfg->ssl_protocol.c_str());
+    NT_print("ERROR - Use TLS, TLSv1_2 or TLSv1_3");
     return 1;
   }
 
-  if(!sslcfg->ssh_ca_list_file.is_null()) ssl->SetCAList(sslcfg->ssh_ca_list_file.c_str());
+  if(!gxSSL::InitSSLibrary()) {
+    NT_print("ERROR - Cannot initializing SSL library");
+    return 1;
+  }
 
+  // Frontend server context
+  ssl->SetSSLProto(sslcfg->meth);
+  ssl->MakeServer();
+  if(!sslcfg->ssh_ca_list_file.is_null()) ssl->SetCAList(sslcfg->ssh_ca_list_file.c_str());
   NT_print("Loading SSL key and cert");
   if(!ssl->InitCTX(sslcfg-> ssl_cert_file.c_str(), sslcfg->ssl_key_file.c_str())) {
     NT_print("ERROR - Problem loading key and cert");
-    if(servercfg->debug) NT_print(ssl->SSLExceptionMessage());
+    NT_print(ssl->SSLExceptionMessage());
+    gxString err;
+    gxSSL::GlobalSSLError(err);
+    if(!err.is_null()) NT_print(err.c_str());
     return 1;
   }
+  if(SSL_CTX_check_private_key(ssl->GetCTX()) != 1) {
+    NT_print("ERROR - Private key does not match the certificate:", sslcfg->ssl_key_file.c_str());
+    return 1;
+  }
+  if(set_ssl_ciphers(ssl->GetCTX()) != 0) return 1;
+
   if(sslcfg->ssl_use_dhparms) {
     NT_print("Loading Diffie-Hellman parameters");
     if(ssl->LoadDHParms(sslcfg->ssl_dhparms_file.c_str()) != gxSSL_NO_ERROR) {
       NT_print("ERROR - Problem loading DH parms");
-      if(servercfg->debug) NT_print(ssl->SSLExceptionMessage());
+      NT_print(ssl->SSLExceptionMessage());
       return 1;
     }
   }
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+  else {
+    SSL_CTX_set_dh_auto(ssl->GetCTX(), 1); // Built in RFC 7919 groups for DHE suites
+  }
+#endif
 
-  switch(sslcfg->meth) {
-    case gxSSL_SSLv2:
-      NT_print("SSL connections will only use SSLv2"); 
-      break;
-    case gxSSL_SSLv23:
-      NT_print("SSL connections will use SSLv2, SSLv3, TLSv1, TLSv1.1 and TLSv1.2"); 
-      break;
-    case gxSSL_SSLv3:
-      NT_print("SSL connections will only use SSLv3"); 
-      break;
-    case gxSSL_TLSv1:
-      NT_print("SSL connections will only use TLSv1"); 
-      break;
-    case gxSSL_TLS:
-      NT_print("SSL connections will use SSLv3, TLSv1, TLSv1.1 and TLSv1.2"); 
-      break;
-    case gxSSL_TLSv1_1:
-      NT_print("SSL connections will only use TLSv1_1"); 
-      break;
-    case gxSSL_TLSv1_2:
-      NT_print("SSL connections will only use TLSv1_2"); 
-      break;
-    case gxSSL_DTLS:
-      NT_print("SSL connections will use multiple DTLS methods"); 
-      break;
-    case gxSSL_DTLSv1:
-      NT_print("SSL connections will only use DTLSv1"); 
-      break;
-    case gxSSL_DTLSv1_2:
-      NT_print("SSL connections will only use DTLSv1_2"); 
-      break;
-    default:
-      NT_print("SSL connections will use SSLv2, SSLv3, TLSv1, TLSv1.1 and TLSv1.2"); 
-      break;
+  // 10/25/2026: Backend client context, created once and shared by all
+  // backend connections. Certificates are verified against the CA list,
+  // or the system trust store, unless ssl_verify_backend_cert = 0.
+  if(sslcfg->ssl_encrypt_backend) {
+    gxSSL *b = &sslcfg->backend;
+    b->SetSSLProto(sslcfg->meth);
+    b->MakeClient();
+    if(sslcfg->ssl_verify_backend_cert) {
+      b->RequireVerifyCert();
+      if(!sslcfg->ssl_backend_ca_list_file.is_null()) b->SetCAList(sslcfg->ssl_backend_ca_list_file.c_str());
+      NT_print("Backend certificates will be verified");
+    }
+    else {
+      NT_print("WARNING - Backend certificates will not be verified");
+    }
+    if(!b->InitCTX()) {
+      NT_print("ERROR - Cannot initialize the backend SSL context");
+      NT_print(b->SSLExceptionMessage());
+      if(!sslcfg->ssl_backend_ca_list_file.is_null()) {
+	NT_print("ERROR - Check ssl_backend_ca_list_file:", sslcfg->ssl_backend_ca_list_file.c_str());
+      }
+      return 1;
+    }
+    if(set_ssl_ciphers(b->GetCTX()) != 0) return 1;
   }
 
-  return error_level;
+  return 0;
 }
 
+int set_ssl_ciphers(SSL_CTX *ctx)
+// 10/25/2026: Ciphers follow the system crypto policy unless the config
+// restricts them. The old code set "ALL" on every connection.
+{
+  if(!sslcfg->ssl_cipher_list.is_null()) {
+    if(SSL_CTX_set_cipher_list(ctx, sslcfg->ssl_cipher_list.c_str()) != 1) {
+      NT_print("ERROR - Bad ssl_cipher_list:", sslcfg->ssl_cipher_list.c_str());
+      return 1;
+    }
+  }
+#if OPENSSL_VERSION_NUMBER >= 0x10101000L
+  if(!sslcfg->ssl_ciphersuites.is_null()) {
+    if(SSL_CTX_set_ciphersuites(ctx, sslcfg->ssl_ciphersuites.c_str()) != 1) {
+      NT_print("ERROR - Bad ssl_ciphersuites:", sslcfg->ssl_ciphersuites.c_str());
+      return 1;
+    }
+  }
+#endif
+  return 0;
+}
 // ----------------------------------------------------------- // 
 // ------------------------------- //
 // --------- End of File --------- //

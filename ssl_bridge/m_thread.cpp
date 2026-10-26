@@ -68,6 +68,7 @@ void ClientSocket_t::FreeSSL()
     openssl = 0;
   }
   if(openssl_client) {
+    openssl_client->ReleaseCTX(); // The shared backend context is freed at exit
     delete openssl_client;
     openssl_client = 0;
   }
@@ -260,8 +261,6 @@ void *LBServerThread::ThreadEntryRoutine(gxThread_t *thread)
     s->client_name = client_name;
     s->r_port = r_port;
 
-    SSL_CTX_set_cipher_list(sslcfg->openssl.GetCTX(), "ALL");
- 
     s->openssl = new gxSSL(sslcfg->openssl.GetCTX());
     if(!s->openssl) {
       message << clear << "[" << seq_num << "]: ERROR - A fatal memory allocation error occurred in main server thread";
@@ -271,16 +270,14 @@ void *LBServerThread::ThreadEntryRoutine(gxThread_t *thread)
       break;
     }
     if(sslcfg->ssl_encrypt_backend) {
-      s->openssl_client = new gxSSL();
+      // 10/25/2026: One client context is shared by every backend connection
+      s->openssl_client = new gxSSL(sslcfg->backend.GetCTX());
       if(!s->openssl_client) {
 	message << clear << "[" << seq_num << "]: ERROR - A fatal memory allocation error occurred in main server thread";
 	LogMessage(message.c_str());
 	servercfg->accept_clients = 0;
 	delete s;
 	break;
-      }
-      if((sslcfg->ssl_verify_backend_cert) && (!sslcfg->ssl_backend_hostname.is_null())) {
-	s->openssl_client->SetCAList(sslcfg->ssl_backend_ca_list_file.c_str());
       }
     }
 
@@ -412,6 +409,28 @@ void LBClientRequestThread::ThreadCleanupHandler(gxThread_t *thread)
     if(s->client.GetSocket() > 0) { close(s->client.GetSocket()); s->client.SetSocket(-1); }
     delete s; s = 0;
   }
+}
+
+void SetupBackendSSL(ClientSocket_t *s, LBnode *n)
+// 10/25/2026: Set the name sent as SNI and checked against the backend
+// certificate: ssl_backend_hostname if set, or the node host name or IP.
+// With ssl_verify_backend_cert the handshake fails if the certificate
+// chain or name does not verify.
+{
+  if(!s->openssl_client || !n) return;
+  if(!sslcfg->ssl_backend_hostname.is_null()) {
+    s->openssl_client->SetHostName(sslcfg->ssl_backend_hostname.c_str());
+  }
+  else {
+    s->openssl_client->SetHostName(n->hostname.c_str());
+  }
+  if(sslcfg->ssl_verify_backend_cert) {
+    s->openssl_client->RequireVerifyCert();
+  }
+  else {
+    s->openssl_client->NoVerifyCert();
+  }
+  SetSocketTimeouts(s->client.GetSocket(), sslcfg->ssl_handshake_timeout_secs, sslcfg->ssl_handshake_timeout_secs);
 }
 
 int get_fd_error(int &error_number, gxString &sbuf)
@@ -600,6 +619,7 @@ LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> 
 	else {
 	  if(sslcfg->ssl_encrypt_backend && s->openssl_client) {
 	    has_ssl_error = 0;
+	    SetupBackendSSL(s, ptr->data);
 	    if(s->openssl_client->OpenSSLSocket(s->client.GetSocket()) != gxSSL_NO_ERROR) {
 	      if(servercfg->log_level >= 3) {
 		sbuf << clear << "[" << seq_num << "]: Error opening backend SSL socket";
@@ -612,23 +632,13 @@ LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> 
 	    if(!has_ssl_error) {
 	      if(s->openssl_client->ConnectSSLSocket() != gxSSL_NO_ERROR) {
 		if(servercfg->log_level >= 3) {
-		  sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket";
+		  sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket, certificate check: "
+	     << gxSSL::CertVerifyErrorString(SSL_get_verify_result(s->openssl_client->GetSSL()));
 		  LogMessage(sbuf.c_str());
 		  sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
 		  LogMessage(sbuf.c_str());
 		}
 		has_ssl_error = 1;
-	      }
-	    }
-	    if(!has_ssl_error) {
-	      if((sslcfg->ssl_verify_backend_cert) && (!sslcfg->ssl_backend_hostname.is_null())) {
-		if(s->openssl_client->VerifyCert(sslcfg->ssl_backend_hostname.c_str()) != gxSSL_NO_ERROR) {
-		  sbuf << clear << "[" << seq_num << "]: SSL cert verify error for " << sslcfg->ssl_backend_hostname;
-		  LogMessage(sbuf.c_str());
-		  sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
-		  LogMessage(sbuf.c_str());
-		  has_ssl_error = 1;
-		}
 	      }
 	    }
 	    if(has_ssl_error) {
@@ -853,6 +863,7 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
     }
     
     if(sslcfg->ssl_encrypt_backend && s->openssl_client) {
+      SetupBackendSSL(s, ptr->data);
       if(s->openssl_client->OpenSSLSocket(s->client.GetSocket()) != gxSSL_NO_ERROR) {
 	if(servercfg->log_level >= 3) {
 	  sbuf << clear << "[" << seq_num << "]: Error opening backend SSL socket";
@@ -866,7 +877,8 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
       }
       if(s->openssl_client->ConnectSSLSocket() != gxSSL_NO_ERROR) {
 	if(servercfg->log_level >= 3) {
-	  sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket";
+	  sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket, certificate check: "
+	     << gxSSL::CertVerifyErrorString(SSL_get_verify_result(s->openssl_client->GetSSL()));
 	  LogMessage(sbuf.c_str());
 	  sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
 	  LogMessage(sbuf.c_str());
@@ -874,17 +886,6 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
 	s->openssl_client->CloseSSLSocket();
 	if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
 	return 0;
-      }
-      if((sslcfg->ssl_verify_backend_cert) && (!sslcfg->ssl_backend_hostname.is_null())) {
-	if(s->openssl_client->VerifyCert(sslcfg->ssl_backend_hostname.c_str()) != gxSSL_NO_ERROR) {
-	  sbuf << clear << "[" << seq_num << "]: SSL cert verify error for " << sslcfg->ssl_backend_hostname;
-	  LogMessage(sbuf.c_str());
-	  sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
-	  LogMessage(sbuf.c_str());
-	  s->openssl_client->CloseSSLSocket();
-	  if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
-	  return 0;
-	}
       }
     }
   }
@@ -996,6 +997,7 @@ LBnode *LBClientRequestThread::distrib(ClientSocket_t *s)
   }
 
   if(sslcfg->ssl_encrypt_backend && s->openssl_client) {
+    SetupBackendSSL(s, limit_ptr->data.active_ptr);
     if(s->openssl_client->OpenSSLSocket(s->client.GetSocket()) != gxSSL_NO_ERROR) {
       if(servercfg->log_level >= 3) {
 	sbuf << clear << "[" << seq_num << "]: Error opening backend SSL socket";
@@ -1009,7 +1011,8 @@ LBnode *LBClientRequestThread::distrib(ClientSocket_t *s)
     }
     if(s->openssl_client->ConnectSSLSocket() != gxSSL_NO_ERROR) {
       if(servercfg->log_level >= 3) {
-	sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket";
+	sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket, certificate check: "
+	     << gxSSL::CertVerifyErrorString(SSL_get_verify_result(s->openssl_client->GetSSL()));
 	LogMessage(sbuf.c_str());
 	sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
 	LogMessage(sbuf.c_str());
@@ -1017,17 +1020,6 @@ LBnode *LBClientRequestThread::distrib(ClientSocket_t *s)
       s->openssl_client->CloseSSLSocket();
       if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
       return round_robin(s, servercfg->distributed_rr_node_list);
-    }
-    if((sslcfg->ssl_verify_backend_cert) && (!sslcfg->ssl_backend_hostname.is_null())) {
-      if(s->openssl_client->VerifyCert(sslcfg->ssl_backend_hostname.c_str()) != gxSSL_NO_ERROR) {
-	sbuf << clear << "[" << seq_num << "]: SSL cert verify error for " << sslcfg->ssl_backend_hostname;
-	LogMessage(sbuf.c_str());
-	sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
-	LogMessage(sbuf.c_str());
-	s->openssl_client->CloseSSLSocket();
-	if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
-	return round_robin(s, servercfg->distributed_rr_node_list);
-      }
     }
   }
   
@@ -1140,6 +1132,7 @@ LBnode *LBClientRequestThread::weighted(ClientSocket_t *s)
   }
 
   if(sslcfg->ssl_encrypt_backend && s->openssl_client) {
+    SetupBackendSSL(s, limit_ptr->data.active_ptr);
     if(s->openssl_client->OpenSSLSocket(s->client.GetSocket()) != gxSSL_NO_ERROR) {
       if(servercfg->log_level >= 3) {
 	sbuf << clear << "[" << seq_num << "]: Error opening backend SSL socket";
@@ -1153,7 +1146,8 @@ LBnode *LBClientRequestThread::weighted(ClientSocket_t *s)
     }
     if(s->openssl_client->ConnectSSLSocket() != gxSSL_NO_ERROR) {
       if(servercfg->log_level >= 3) {
-	sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket";
+	sbuf << clear << "[" << seq_num << "]: Error connecting to backend SSL socket, certificate check: "
+	     << gxSSL::CertVerifyErrorString(SSL_get_verify_result(s->openssl_client->GetSSL()));
 	LogMessage(sbuf.c_str());
 	sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
 	LogMessage(sbuf.c_str());
@@ -1161,17 +1155,6 @@ LBnode *LBClientRequestThread::weighted(ClientSocket_t *s)
       s->openssl_client->CloseSSLSocket();
       if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
       return round_robin(s, servercfg->weighted_rr_node_list);
-    }
-    if((sslcfg->ssl_verify_backend_cert) && (!sslcfg->ssl_backend_hostname.is_null())) {
-      if(s->openssl_client->VerifyCert(sslcfg->ssl_backend_hostname.c_str()) != gxSSL_NO_ERROR) {
-	sbuf << clear << "[" << seq_num << "]: SSL cert verify error for " << sslcfg->ssl_backend_hostname;
-	LogMessage(sbuf.c_str());
-	sbuf << clear << "[" << seq_num << "]: " << s->openssl_client->SSLErrorMessage();
-	LogMessage(sbuf.c_str());
-	s->openssl_client->CloseSSLSocket();
-	if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
-	return round_robin(s, servercfg->weighted_rr_node_list);
-      }
     }
   }
 

@@ -48,12 +48,14 @@ SSLconfig::SSLconfig()
   ssl_backend_ca_list_file = "/etc/pki/tls/certs/ca-bundle.crt";
   ssl_encrypt_backend = 0;
   ssl_backend_hostname.Clear();
-  ssl_verify_backend_cert = 0;
+  ssl_verify_backend_cert = 1; // 10/25/2026: Backend certificates are verified by default
   ssh_ca_list_file.Clear();
   ssl_use_dhparms = 0;
   ssl_handshake_timeout_secs = 30;
-  meth =  gxSSL_SSLv23;
-  ssl_protocol = "SSLv23";
+  meth =  gxSSL_TLS;
+  ssl_protocol = "TLS";
+  ssl_cipher_list.Clear();
+  ssl_ciphersuites.Clear();
 }
 
 SSLconfig::~SSLconfig()
@@ -121,19 +123,19 @@ int LoadSSLConfig()
     dfile << "[SSLCONFIG]" << "\n";
     dfile << "# SSL bridge config" << "\n";
     dfile << "#" << "\n";
-    dfile << "# SSL protocol" << "\n";
-    dfile << "# Default is SSLv2, SSLv3, TLSv1, TLSv1.1 and TLSv1.2" << "\n";
-    dfile << "ssl_protocol = SSLv23" << "\n";
-    dfile << "# Other protocol options:ssl_protocol:" << "\n";
-    dfile << "# " << "\n";
-    dfile << "# SSLv2 - SSL version 2" << "\n";
-    dfile << "# SSLv3 - SSL version 3" << "\n";
-#if OPENSSL_VERSION_NUMBER >= 0x1000200fL
-    dfile << "# TLS - SSLv3, TLSv1, TLSv1.1 and TLSv1.2" << "\n";
-#endif
-    dfile << "# TLSv1 - TLS version 1" << "\n";
-    dfile << "# TLSv1_1 - TLS version 1.1" << "\n";
-    dfile << "# TLSv1_2 - TLS version 1.2" << "\n";
+    dfile << "# TLS protocol versions" << "\n";
+    dfile << "# TLS - TLS 1.2 and TLS 1.3 (default)" << "\n";
+    dfile << "# TLSv1_2 - TLS 1.2 only" << "\n";
+    dfile << "# TLSv1_3 - TLS 1.3 only" << "\n";
+    dfile << "ssl_protocol = TLS" << "\n";
+    dfile << "#" << "\n";
+    dfile << "# Ciphers follow the system crypto policy (update-crypto-policies)." << "\n";
+    dfile << "# Set these only to restrict them further for this server." << "\n";
+    dfile << "##ssl_cipher_list = ECDHE+AESGCM:ECDHE+CHACHA20" << "\n";
+    dfile << "##ssl_ciphersuites = TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256" << "\n";
+    dfile << "#" << "\n";
+    dfile << "# Seconds allowed for a TLS handshake" << "\n";
+    dfile << "ssl_handshake_timeout_secs = 30" << "\n";
     dfile << "#" << "\n";
     dfile << "# Private key file" << "\n";
     dfile << "ssl_key_file = /etc/drlb/ssl/private/ca.key" << "\n";
@@ -151,10 +153,11 @@ int LoadSSLConfig()
     dfile << "# Client side settings for backend SSL encryption" << "\n";
     dfile << "# Use SSL to connect to LB nodes" << "\n";
     dfile << "##ssl_encrypt_backend = 0" << "\n";
-    dfile << "# The backend hostname must match the issuer's cert CN name" << "\n";
+    dfile << "# Backend certificates are verified against the CA list and the node" << "\n";
+    dfile << "# hostname, or ssl_backend_hostname if set, using subjectAltName." << "\n";
+    dfile << "# Set ssl_verify_backend_cert = 0 only for test backends." << "\n";
     dfile << "##ssl_backend_hostname = www.example.com" << "\n";
-    dfile << "# If verify cert is set to 1 you will need to provide a trusted CA list" << "\n";
-    dfile << "##ssl_verify_backend_cert = 0" << "\n";
+    dfile << "##ssl_verify_backend_cert = 1" << "\n";
     dfile << "##ssl_backend_ca_list_file = /etc/pki/tls/certs/ca-bundle.crt" << "\n";
 
     dfile << "\n";
@@ -265,6 +268,18 @@ int LoadSSLConfig()
 		NT_print("ERROR - Bad ssl_handshake_timeout_secs value in [SSLCONFIG]");
 		error_level = 1;
 	      }
+	    }
+	  }
+	  if(info_line.IFind("ssl_cipher_list") != -1) {
+	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
+	    if(parm_name == "ssl_cipher_list") {
+	      sslcfg->ssl_cipher_list = CfgGetEqualToParm(info_line, pbuf);
+	    }
+	  }
+	  if(info_line.IFind("ssl_ciphersuites") != -1) {
+	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
+	    if(parm_name == "ssl_ciphersuites") {
+	      sslcfg->ssl_ciphersuites = CfgGetEqualToParm(info_line, pbuf);
 	    }
 	  }
 	  if(info_line.IFind("ssl_protocol") != -1) {

@@ -39,6 +39,7 @@ SSL utils for DR load balancer.
 #include "gxstring.h"
 
 int init_ssl_cert();
+int set_ssl_ciphers(SSL_CTX *ctx);
 
 #endif // __SSH_UTILS_HPP__
 // ----------------------------------------------------------- // 

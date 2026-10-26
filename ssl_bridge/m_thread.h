@@ -119,6 +119,7 @@ public:
 // Standalone functions
 // --------------------------------------------------------------
 int get_fd_error(int &error_number, gxString &sbuf);
+void SetupBackendSSL(ClientSocket_t *s, LBnode *n);
 // --------------------------------------------------------------
 
 #endif // __DRLB_MTHREAD_HPP__
