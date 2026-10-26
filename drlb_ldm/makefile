@@ -9,8 +9,6 @@ clean:
 
 clean_lib:
 	rm -fv ../lib/libdatareel.a
-	rm -fv ../lib/libdatareel.so
-	rm -fv ../lib/libdatareel.so.5.0
 
 install:
 	cp -fv drlb_ldm_server ../bin/drlb_ldm_server
