@@ -47,7 +47,7 @@ LBconfig::LBconfig()
 {
   scheme = LB_RR;
   use_buffer_cache = 1;
-  buffer_size = 1555;
+  buffer_size = 65536; // 10/25/2026: Was 1555, larger reads cut system calls
   debug = 0;
   debug_level = 1;
   verbose = 0;
@@ -161,6 +161,7 @@ LBconfig::LBconfig()
   http_eol = "\r\n";
   http_eoh = "\r\n\r\n";
   http_forward_for_str = "X-Forwarded-For";
+  rr_counter[0] = rr_counter[1] = rr_counter[2] = 0;
 }
 
 LBconfig::~LBconfig()
@@ -322,9 +323,10 @@ LBnode::LBnode()
   weight = -1; // Not set
   scheme = LB_RR; // Use round robin as default
   max_connections = -1; // Not set
-  buffer_size = 1555; // Default read/write buffer size
+  buffer_size = 65536; // Default read/write buffer size
   num_connections = 0;
   num_connections_is_locked = 0;
+  lb_flag = 0; // 10/25/2026: Was never initialized
   lb_flag_is_locked = 0;
   connection_total_is_locked = 0;
   active_ptr = this;
@@ -342,6 +344,7 @@ void LBnode::Copy(const LBnode &n)
   max_connections = n.max_connections;
   buffer_size = n.buffer_size;
   num_connections = n.num_connections;
+  lb_flag = n.lb_flag;
   node_name = n.node_name;
   num_connections_is_locked = 0;
   connection_total_is_locked = 0;
@@ -733,7 +736,7 @@ int LoadOrBuildConfigFile()
     dfile << "# Use Round Robin as default LB scheme" << "\n";
     dfile << "scheme = LB_RR" << "\n";
     dfile << "use_buffer_cache = 1" << "\n";
-    dfile << "buffer_size = 1500" << "\n";
+    dfile << "buffer_size = 65536" << "\n";
     dfile << "max_connections = -1 # Not set, if set will limit number of connections this server" << "\n";
     dfile << "max_threads = -1 # Not set, if set will limit number of threads for this process" << "\n";
     dfile << "#" << "\n";
@@ -1121,7 +1124,7 @@ int LoadOrBuildConfigFile()
 	  CfgGetParmName(ptr->data, parm_name); parm_name.ToLower();
 	  if(parm_name == "retries") {
 	    servercfg->retries = CfgGetEqualToParm(ptr->data);
-	    if(servercfg->retries < 0) {
+	    if(CfgGetEqualToParm(ptr->data) < 0) { // 10/25/2026: retries is unsigned, check the value read
 	      NT_print("Config file has bad retries value");
 	      error_level = 1;
 	    }
@@ -1129,7 +1132,7 @@ int LoadOrBuildConfigFile()
 	}
 	if(ptr->data.IFind("retry_wait") != -1) {
 	  servercfg->retry_wait = CfgGetEqualToParm(ptr->data);
-	  if(servercfg->retry_wait < 0) {
+	  if(CfgGetEqualToParm(ptr->data) < 0) { // 10/25/2026: retry_wait is unsigned, check the value read
 	    NT_print("Config file has bad retry_wait value");
 	    error_level = 1;
 	  }
@@ -1711,13 +1714,14 @@ int LBconfig::NT_ReadRulesConfig()
 	}
 	else {
 	  // Check for lead quotes and un-escaped trailing quotes
+	  // 10/25/2026: Check the length before looking at the last two characters
 	  vals[1].TrimLeading('"');
-	  if((vals[1][vals[1].length()-1] == '"') &&
+	  if((vals[1].length() >= 2) && (vals[1][vals[1].length()-1] == '"') &&
 	     (vals[1][vals[1].length()-2] != '\\')) {
 	    vals[1].TrimTrailing('"');
 	  }
 	  vals[1].TrimLeading('\'');
-	  if((vals[1][vals[1].length()-1] == '\'') &&
+	  if((vals[1].length() >= 2) && (vals[1][vals[1].length()-1] == '\'') &&
 	     (vals[1][vals[1].length()-2] != '\\')) {
 	    vals[1].TrimTrailing('\'');
 	  }

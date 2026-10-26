@@ -205,8 +205,30 @@ int StopThreads()
   return error_level;
 }
 
+void RequestStop()
+// 10/25/2026: Ask the main thread to stop the server. The main thread
+// returns from run_server() when the process thread wakes up, then calls
+// StopProc() and exits. Calling StopProc() and exit() from the signal
+// thread as well made two threads close the same files.
+{
+  servercfg->accept_clients = 0;
+  servercfg->kill_server = 1;
+  servercfg->process_loop = 0;
+  servercfg->process_cond.ConditionSignal(); 
+}
+
 int StopProc() 
 {
+  // 10/25/2026: Only one thread stops the server. A second caller waits
+  // here until the first one is done.
+  static pthread_mutex_t stop_lock = PTHREAD_MUTEX_INITIALIZER;
+  static int stopped = 0;
+  pthread_mutex_lock(&stop_lock);
+  if(stopped) {
+    pthread_mutex_unlock(&stop_lock);
+    return 1;
+  }
+
   if(servercfg->debug && servercfg->log_level == 0) servercfg->log_level = 1;
   servercfg->accept_clients = 0;
   servercfg->kill_server = 1;
@@ -224,6 +246,8 @@ int StopProc()
   NT_print("Sending termination signal to end process");
   sSleep(1);
 
+  stopped = 1;
+  pthread_mutex_unlock(&stop_lock);
   return 1;
 }
 
@@ -283,13 +307,11 @@ void termination_handler(int signum)
 // the signal thread, not from a signal handler.
 {
   gxString sbuf;
-  int retries = 3;
 
   if(signum == SIGINT) {
     LogProcMessage("Process interrupted with Ctrl-C");
-    while(!StopProc() && --retries) sSleep(1);
-    if(!retries) ExitProc(1);
-    ExitProc(0);
+    RequestStop();
+    return;
   }
   if(signum == SIGQUIT) {
     LogProcMessage("Process interrupted Ctrl-backslash");
@@ -297,9 +319,8 @@ void termination_handler(int signum)
   }
   if(signum == SIGTERM) {
     LogProcMessage("Process terminated by kill command");
-    while(!StopProc() && --retries) sSleep(1);
-    if(!retries) ExitProc(1);
-    ExitProc(0);
+    RequestStop();
+    return;
   }
   if(signum == SIGHUP) {
     LogProcMessage("Process received hangup");

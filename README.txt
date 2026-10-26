@@ -40,6 +40,7 @@ Contents:
 * Linux Kernel Tuning
 * Testing with Apache
 * HTTP IP address forwarding
+* Regression tests
 * Remaining work on this project
 * Support and Bug Tracking
 
@@ -825,25 +826,26 @@ read from TCP socket connections. In certain network environments it
 may be necessary to disable cache buffering or change the default
 buffer size. Lowing the buffer size will result in more reads per
 connection. Increasing the buffer size will decrease the number of
-reads per connection. To set the cache or buffer size settings for all
+reads per connection. The default buffer size is 65536 bytes (it was
+1500 in DRLB 1.59 and earlier). To set the cache or buffer size settings for all
 nodes, edit your configuration file and modify the following
 parameters in the [LBSERVER] section:
 
 [LBSERVER]
 ...
 use_buffer_cache = 1
-buffer_size = 1500
+buffer_size = 65536
 
 To set the buffer size for individual nodes:
 
 [LBNODE]
 node_name = lbnode1
-buffer_size = 1500
+buffer_size = 65536
 ...
 
 [LBNODE]
 node_name = lbnode2
-buffer_size = 1500
+buffer_size = 16384
 ...
 
 [LBNODE]
@@ -1197,6 +1199,18 @@ must add the following to your httpd conf:
 
 LogFormat "%h %l %u %t \"%r\" %>s %b %{X-Forwarded-For}i \"%{Referer}i\" \"%{User-Agent}i\"" combined
 LogFormat "%h %l %u %t \"%r\" %>s %b" %{X-Forwarded-For}i common
+
+Regression tests
+----------------
+After building, run the regression tests from the top of the source
+tree. They start local test servers on 127.0.0.1 and need only Python 3
+(and the openssl command for the SSL bridge):
+
+$ python3 tests/drlb_tests.py
+
+The tests cover load balancing, fail over, timeouts, shutdown and the
+security fixes in this release. Each prints PASS or FAIL per check and
+exits non-zero if any check fails.
 
 Remaining work on this project
 ------------------------------

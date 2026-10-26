@@ -318,7 +318,7 @@ void *LBClientRequestThread::ThreadEntryRoutine(gxThread_t *thread)
 	    LogDebugMessage(message.c_str());
 	  }
 	  if(servercfg->throttle_wait_secs >= 1) sSleep(servercfg->throttle_wait_secs);
-	  if(servercfg->throttle_wait_usecs >= 1) sSleep(servercfg->throttle_wait_usecs);
+	  if(servercfg->throttle_wait_usecs >= 1) uSleep(servercfg->throttle_wait_usecs);
 	}
       }
     }
@@ -464,102 +464,83 @@ LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s)
   return round_robin(s, servercfg->nodes);
 }
 
-LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> &node_list)
+int LBClientRequestThread::connect_backend(ClientSocket_t *s, LBnode *n, const char *how)
+// 10/25/2026: Connect to one backend node. Returns 0 if connected.
 {
   gxString sbuf;
-  gxString message;
   unsigned seq_num = s->seq_num;
-  gxListNode<LBnode *> *ptr = node_list.GetHead();
-  unsigned count = 0;
-  unsigned retries = servercfg->retries;
-  unsigned retry_wait = servercfg->retry_wait;
-  unsigned error_flag = 0;
-  unsigned num_connects = 0;
-  unsigned num_nodes = servercfg->NUM_NODES();
   gxSocket *client = &s->client;
 
-  while(ptr) {
-    if(ptr->data->LB_FLAG() == 0 && servercfg->check_node_max_clients(ptr->data, seq_num) == 0) {
-      if(servercfg->log_level >= 2) {
-	sbuf << clear << "[" << seq_num << "]: " << ptr->data->node_name << " RR connect to " << ptr->data->hostname 
-	     << " port " << ptr->data->port_number;
-	LogMessage(sbuf.c_str());
-      }
-      client->Clear();
-      int init_error = 0;
-      if(client->InitSocket(SOCK_STREAM, ptr->data->port_number,  ptr->data->hostname.c_str()) < 0) {
-	if(servercfg->log_level >= 1) {
-	  sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot open connection to backend host " << ptr->data->hostname 
-	       << " port " << ptr->data->port_number;
-	  LogMessage(sbuf.c_str());
-	  CheckSocketError(client, seq_num);
-	}
-	ptr->data->LB_FLAG(0);
-	error_flag++;
-	init_error = 1;
-      }
-      if(init_error == 0) {
-	SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
-	if(client->Connect() < 0) {
-	  if(servercfg->log_level >= 1) {
-	    sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot connect to backend host " 
-		 << ptr->data->hostname << " port " << ptr->data->port_number;
-	    LogMessage(sbuf.c_str());
-	    CheckSocketError(client, seq_num);
-	  }
-	  if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
-	  ptr->data->LB_FLAG(0);
-	  error_flag++;
-	}
-	else {
-	  num_connects++;
-	  error_flag = 0;
-	}
-      }
+  if(servercfg->log_level >= 2) {
+    sbuf << clear << "[" << seq_num << "]: " << n->node_name << " " << how << " connect to " << n->hostname 
+	 << " port " << n->port_number;
+    LogMessage(sbuf.c_str());
+  }
+  client->Clear();
+  if(client->InitSocket(SOCK_STREAM, n->port_number, n->hostname.c_str()) < 0) {
+    if(servercfg->log_level >= 1) {
+      sbuf << clear << "[" << seq_num << "]: ERROR - " << n->node_name << " cannot open connection to backend host " << n->hostname 
+	   << " port " << n->port_number;
+      LogMessage(sbuf.c_str());
+      CheckSocketError(client, seq_num);
+    }
+    if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
+    return 1;
+  }
+  SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
+  if(client->Connect() < 0) {
+    if(servercfg->log_level >= 1) {
+      sbuf << clear << "[" << seq_num << "]: ERROR - " << n->node_name << " cannot connect to backend host " 
+	   << n->hostname << " port " << n->port_number;
+      LogMessage(sbuf.c_str());
+      CheckSocketError(client, seq_num);
+    }
+    if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
+    return 1;
+  }
+  return 0;
+}
 
-      if(error_flag == 0) {
-	ptr->data->LB_FLAG(1);
-	error_flag = 0;
-	break;
+LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> &node_list)
+// 10/25/2026: Each connection starts at the next node in the list, taken
+// from a shared counter, and tries every node once per pass. A failed
+// pass is retried up to servercfg->retries times. The old version kept
+// a used flag per node that was only reset by a retry, so with
+// retries = 0 every other connection failed, and its retries restarted
+// at the full node list instead of the list it was given.
+{
+  gxString sbuf;
+  unsigned seq_num = s->seq_num;
+  unsigned num_nodes = 0;
+  gxListNode<LBnode *> *ptr = node_list.GetHead();
+  while(ptr) { num_nodes++; ptr = ptr->next; }
+  if(num_nodes == 0) return 0;
+
+  unsigned long *counter = &servercfg->rr_counter[0];
+  if(&node_list == &servercfg->distributed_rr_node_list) counter = &servercfg->rr_counter[1];
+  if(&node_list == &servercfg->weighted_rr_node_list) counter = &servercfg->rr_counter[2];
+
+  unsigned retries = servercfg->retries;
+  while(1) {
+    unsigned start = (unsigned)(__atomic_fetch_add(counter, 1UL, __ATOMIC_RELAXED) % num_nodes);
+    ptr = node_list.GetHead();
+    for(unsigned i = 0; i < start; i++) ptr = ptr->next;
+    for(unsigned tried = 0; tried < num_nodes; tried++) {
+      if(servercfg->check_node_max_clients(ptr->data, seq_num) == 0) {
+	if(connect_backend(s, ptr->data, "RR") == 0) return ptr->data;
       }
+      ptr = ptr->next;
+      if(!ptr) ptr = node_list.GetHead();
     }
-    count++;
-    if((count == num_nodes) && (num_connects == 0)) {
-      if(retries == 0) {
-	error_flag = 1;
-	break;
-      }
-      count = 0;
-      retries--;
-      if(error_flag == num_nodes) {
-	sbuf << clear << "[" << seq_num << "]: ERROR - All connection attempts failed, retry attempt number " << retries;
-	LogMessage(sbuf.c_str());
-	error_flag = 0;
-	if(retry_wait > 0) {
-	  sbuf << clear << "[" << seq_num << "]: ERROR - All node reporting errors. waiting " << retry_wait << " seconds";
-	  LogMessage(sbuf.c_str());
-	  sSleep(retry_wait);
-	}
-      }
-      ptr = servercfg->nodes.GetHead();
-      while(ptr) {
-	ptr->data->LB_FLAG(0);
-	ptr = ptr->next;
-      }
-      ptr = servercfg->nodes.GetHead();
-      continue;
-    }
-    ptr = ptr->next;
+    if(retries == 0) break;
+    retries--;
+    sbuf << clear << "[" << seq_num << "]: ERROR - All connection attempts failed, retries left " << retries;
+    LogMessage(sbuf.c_str());
+    if(servercfg->retry_wait > 0) sSleep(servercfg->retry_wait);
   }
 
-  if(error_flag != 0) {
-    message << clear << "[" << seq_num << "]: ERROR - All connection attempts failed";
-    LogMessage(message.c_str());
-    return 0;
-  }
-
-  if(ptr) return ptr->data;
-
+  sbuf << clear << "[" << seq_num << "]: ERROR - All connection attempts failed";
+  LogMessage(sbuf.c_str());
   return 0;
 }
 
@@ -569,7 +550,6 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
   gxString message;
   unsigned seq_num = s->seq_num;
   unsigned error_level = 0;
-  gxSocket *client = &s->client;
   gxString client_name = s->client_name;
   regex_t regex;
   int reti;
@@ -600,9 +580,14 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
 	  gxString hostname_str, error_message;
 	  if(ip_to_hostname(s->client_name, hostname_str, error_message) == 0) {
 	    if((s->client_name != hostname_str) && (!hostname_str.is_null())) { 
-	      regcomp(&regex, lptr->data->front_end_client_ip.c_str(), REG_EXTENDED|REG_NOSUB|REG_ICASE);
-	      reti = regexec(&regex, hostname_str.c_str(), 0, NULL, 0);
-	      regfree(&regex);
+	      reti = regcomp(&regex, lptr->data->front_end_client_ip.c_str(), REG_EXTENDED|REG_NOSUB|REG_ICASE);
+	      if(reti == 0) {
+		reti = regexec(&regex, hostname_str.c_str(), 0, NULL, 0);
+		regfree(&regex);
+	      }
+	      else {
+		reti = REG_NOMATCH; // 10/25/2026: Was used without checking regcomp()
+	      }
 	      if(reti == 0) {
 		if(servercfg->debug && servercfg->debug_level >= 5) {
 		  sbuf << clear << "[" << seq_num << "]: INFO - Frontend hostname matches regex: " << hostname_str << " match " << lptr->data->front_end_client_ip;
@@ -694,34 +679,10 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
   }
 
   if(ptr) {
-    if(servercfg->log_level >= 2) {
-      sbuf << clear << "[" << seq_num << "]: " << ptr->data->node_name << " Assigned connect to " << ptr->data->hostname 
-	   << " port " << ptr->data->port_number;
-      LogMessage(sbuf.c_str());
-    }
     if(servercfg->check_node_max_clients(ptr->data, seq_num) != 0) return 0;
-    client->Clear();
-    if(client->InitSocket(SOCK_STREAM, ptr->data->port_number,  ptr->data->hostname.c_str()) < 0) {
-      if(servercfg->log_level >= 1) {
-	sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot open TCP socket to " << ptr->data->hostname 
-	     << " port " << ptr->data->port_number;
-	LogMessage(sbuf.c_str());
-	CheckSocketError(client, seq_num);
-      }
-      return 0;
-    }
-    SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
-    if(client->Connect() < 0) {
-      sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot connect to " 
-	   << ptr->data->hostname << " port " << ptr->data->port_number;
-      LogMessage(sbuf.c_str());
-      CheckSocketError(client, seq_num);
-      if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
-      return 0;
-    }
+    if(connect_backend(s, ptr->data, "Assigned") != 0) return 0;
+    return ptr->data;
   }
-
-  if(ptr) return ptr->data; 
   return 0;
 }
 
@@ -730,7 +691,6 @@ LBnode *LBClientRequestThread::distrib(ClientSocket_t *s)
   gxString sbuf;
   gxString message;
   unsigned seq_num = s->seq_num;
-  gxSocket *client = &s->client;
   gxList<limit_node> limit_node_list;
   gxListNode<limit_node> *limit_ptr_debug;
 
@@ -794,39 +754,13 @@ LBnode *LBClientRequestThread::distrib(ClientSocket_t *s)
 
  if(!limit_ptr) return round_robin(s, servercfg->distributed_rr_node_list);
 
-  if(servercfg->log_level >= 2) {
-    sbuf << clear << "[" << seq_num << "]: " << limit_ptr->data.active_ptr->node_name << " Distributed connect to " << limit_ptr->data.active_ptr->hostname 
-	 << " port " << limit_ptr->data.active_ptr->port_number;
-    LogMessage(sbuf.c_str());
-  }
-  client->Clear();
-  if(client->InitSocket(SOCK_STREAM, limit_ptr->data.active_ptr->port_number,  limit_ptr->data.active_ptr->hostname.c_str()) < 0) {
-    if(servercfg->log_level >= 1) {
-      sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name << " cannot open TCP socket to " << limit_ptr->data.active_ptr->hostname 
-	   << " port " << limit_ptr->data.active_ptr->port_number;
-      LogMessage(sbuf.c_str());
-      CheckSocketError(client, seq_num);
-    }
-    if(servercfg->debug && servercfg->debug_level >= 5) {
-      sbuf << clear << "[" << seq_num << "]: Connection error will default to distributed round robin";
-      LogMessage(sbuf.c_str());
-    }
-    return round_robin(s, servercfg->distributed_rr_node_list);
-  }
-  SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
-  if(client->Connect() < 0) {
-    sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name << " cannot connect to " 
-	 << limit_ptr->data.active_ptr->hostname << " port " << limit_ptr->data.active_ptr->port_number;
-    LogMessage(sbuf.c_str());
-    CheckSocketError(client, seq_num);
-    if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
+  if(connect_backend(s, limit_ptr->data.active_ptr, "Distributed") != 0) {
     if(servercfg->debug && servercfg->debug_level >= 5) {
       sbuf << clear << "[" << seq_num << "]: Connection error will default to distributed round robin";
       LogDebugMessage(sbuf.c_str());
     }
     return round_robin(s, servercfg->distributed_rr_node_list);
   }
-
   return limit_ptr->data.active_ptr;
 }
 
@@ -835,7 +769,6 @@ LBnode *LBClientRequestThread::weighted(ClientSocket_t *s)
   gxString sbuf;
   gxString message;
   unsigned seq_num = s->seq_num;
-  gxSocket *client = &s->client;
 
 
   gxList<limit_node> limit_node_list;
@@ -901,40 +834,13 @@ LBnode *LBClientRequestThread::weighted(ClientSocket_t *s)
 
   if(!limit_ptr) return round_robin(s, servercfg->weighted_rr_node_list);
 
-  if(servercfg->log_level >= 2) {
-    sbuf << clear << "[" << seq_num << "]: " << limit_ptr->data.active_ptr->node_name << " Weighted connect to " << limit_ptr->data.active_ptr->hostname 
-	 << " port " << limit_ptr->data.active_ptr->port_number;
-    LogMessage(sbuf.c_str());
-  }
-  client->Clear();
-  if(client->InitSocket(SOCK_STREAM, limit_ptr->data.active_ptr->port_number,  limit_ptr->data.active_ptr->hostname.c_str()) < 0) {
-    if(servercfg->log_level >= 1) {
-      sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name 
-	   << " cannot open TCP socket to " << limit_ptr->data.active_ptr->hostname 
-	   << " port " << limit_ptr->data.active_ptr->port_number;
-      LogMessage(sbuf.c_str());
-      CheckSocketError(client, seq_num);
-    }
-    if(servercfg->debug && servercfg->debug_level >= 5) {
-      sbuf << clear << "[" << seq_num << "]: Connection error will default to weighted round robin";
-      LogMessage(sbuf.c_str());
-    }
-    return round_robin(s, servercfg->weighted_rr_node_list);
-  }
-  SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
-  if(client->Connect() < 0) {
-    sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name << " cannot connect to " 
-	 << limit_ptr->data.active_ptr->hostname << " port " << limit_ptr->data.active_ptr->port_number;
-    LogMessage(sbuf.c_str());
-    CheckSocketError(client, seq_num);
-    if(client->GetSocket() > 0) { client->Close(); client->SetSocket(-1); }
+  if(connect_backend(s, limit_ptr->data.active_ptr, "Weighted") != 0) {
     if(servercfg->debug && servercfg->debug_level >= 5) {
       sbuf << clear << "[" << seq_num << "]: Connection error will default to weighted round robin";
       LogDebugMessage(sbuf.c_str());
     }
     return round_robin(s, servercfg->weighted_rr_node_list);
   }
-
   return limit_ptr->data.active_ptr;
 }
 // ----------------------------------------------------------- // 
