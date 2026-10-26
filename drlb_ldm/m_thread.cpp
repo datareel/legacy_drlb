@@ -50,6 +50,7 @@ Multi-threaded framework Datareel LDM load balancer.
 #include "m_thread.h"
 #include "m_log.h"
 #include "membuf.h"
+#include "m_relay.h"
 #include "ldm_feed_types.h"
 #include "ldm_rpc_messages.h"
 #include "ldm_proto.h"
@@ -84,13 +85,8 @@ int LBServerThread::InitServer(int max_connections)
     }
   }
 
-#ifdef SO_REUSEPORT
-  if (setsockopt(gxsocket, SOL_SOCKET, SO_REUSEPORT, (const char*)&reuse, sizeof(reuse)) < 0) {
-    if(servercfg->debug) {
-      LogMessage("ERROR - Socket error setting SO_REUSEPORT option");
-    }
-  }
-#endif
+  // 10/25/2026: SO_REUSEPORT is no longer set. It let a second server
+  // bind the same port and silently take a share of the connections.
 
   if(!servercfg->listen_ip_addr.is_null()) {
     if(servercfg->listen_ip_addr != "0.0.0.0") {
@@ -122,7 +118,7 @@ int LBServerThread::InitServer(int max_connections)
 void *LBServerThread::ThreadEntryRoutine(gxThread_t *thread)
 {
   gxString message, sbuf;
-  int accept_retires = 5;
+  unsigned long accept_errors = 0;
   int error_number = 0;
   int num_start_threads = 4; // main + server_thread + log_thread + process_thread
   if(servercfg->enable_stats) num_start_threads++;
@@ -138,22 +134,30 @@ void *LBServerThread::ThreadEntryRoutine(gxThread_t *thread)
     gxsSocketLength_t addr_size = (gxsSocketLength_t)sizeof(remote_sin); 
     remote_socket = accept(gxsocket, (struct sockaddr *)&remote_sin, &addr_size);
     if(remote_socket < 0) {
-      if(servercfg->debug) {
-	get_fd_error(error_number, sbuf);
-	message << clear << " ENUM: " << error_number << " Message: " << sbuf;
-	LogDebugMessage(message.c_str());
-	LogDebugMessage("ERROR - LB server thread accept() call failed");
-      }
-      sSleep(1); // Allow for recovery time
-      if(--accept_retires <= 0) {
-	get_fd_error(error_number, sbuf);
+      // 10/25/2026: Only a broken listening socket ends the server. Running
+      // out of file descriptors or memory, or a client resetting before
+      // accept() returns, is transient. These errors used to stop the whole
+      // balancer after 5 tries, so a connection flood could shut it down.
+      get_fd_error(error_number, sbuf);
+      if(error_number == EBADF || error_number == EINVAL || error_number == ENOTSOCK ||
+	 error_number == EOPNOTSUPP || error_number == EFAULT) {
 	message << clear << "ERROR - accept() call failed, ENUM: " << error_number << " Message: " << sbuf;
 	LogMessage(message.c_str());
 	break;
       }
+      if(error_number == EINTR || error_number == ECONNABORTED || error_number == EAGAIN) continue;
+      if(accept_errors++ == 0 || servercfg->debug) {
+	message << clear << "ERROR - accept() call failed, will keep retrying, ENUM: " << error_number << " Message: " << sbuf;
+	LogMessage(message.c_str());
+      }
+      mSleep(accept_errors < 10 ? 10 * accept_errors : 100); // Back off while resources are exhausted
       continue;
     }
-    accept_retires = 5;
+    if(accept_errors > 0) {
+      message << clear << "INFO - accept() recovered after " << accept_errors << " failed calls";
+      LogMessage(message.c_str());
+      accept_errors = 0;
+    }
 
     servercfg->CONNECTION_TOTAL(1);
 
@@ -478,12 +482,12 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
     LogDebugMessage(message.c_str());
   }
 
-  if(servercfg->use_buffer_cache) {
-    LB_CachedReadWrite(s, n->buffer_size);
-  }
-  else {
-    LB_ReadWrite(s, n->buffer_size);
-  }
+  RelaySide frontend, backend;
+  frontend.fd = s->client_socket; frontend.name = "Frontend"; frontend.is_frontend = 1;
+  backend.fd = s->client.GetSocket(); backend.name = "Backend";
+  // Every LDM message from the client is checked against ldmd.conf
+  LdmFilter ldm_filter;
+  LB_Relay(s, frontend, backend, n->buffer_size, &ldm_filter);
 
   shutdown(s->client_socket, SHUT_RDWR);
   shutdown(s->client.GetSocket(), SHUT_RDWR);
@@ -494,803 +498,6 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
   }
 
   return;
-}
-
-int LBClientRequestThread::LB_ReadWrite(ClientSocket_t *s, int buffer_size)
-{
-  gxString sbuf, message;
-  unsigned seq_num = s->seq_num;
-  char *buffer = new char[buffer_size];
-  int br, bm, flags1, ready, error_number;
-  int error_level = 0;
-  int idle_count = 0;
-
-  while(servercfg->accept_clients) {
-    if(servercfg->use_timeout && (!ReadSelect(s->client_socket, servercfg->timeout_secs, servercfg->timeout_usecs))) {
-      if(servercfg->debug || servercfg->log_level >= 4) {
-	message << clear << "[" << seq_num << "]: Frontend read socket timeout after " 
-		<< servercfg->timeout_secs << " secs " << servercfg->timeout_usecs << " usecs";
-	LogMessage(message.c_str());
-      }
-      ready = 0;
-    }
-    else {
-      if(!servercfg->use_nonblock_sockets) {
-	idle_count++;
-	if(idle_count >= servercfg->max_idle_count) ReadSelect(s->client_socket, servercfg->idle_wait_secs, servercfg->idle_wait_usecs);
-      }
-      flags1 = fcntl(s->client_socket, F_GETFL, 0);
-      fcntl(s->client_socket, F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client_socket, buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client_socket, F_SETFL, flags1); // Set socket back to blocking read
-    }
-    if(ready > 0) {
-      idle_count = 0;
-      br = read(s->client_socket, buffer, buffer_size);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Frontend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	LogMessage(message.c_str());
-      }
-      if(br == 0) {
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: " << "Frontend socket disconnected duing read()";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(br < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error reading from Frontend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      bm = write(s->client.GetSocket(), buffer, br);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Backend write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	LogDebugMessage(message.c_str());
-      }
-      if(bm < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error writing to Backend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(bm != br) {
-	if(servercfg->log_level >= 3 || servercfg->verbose_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Failed to write " << br << " bytes to Backend socket, wrote " << bm;
-	  LogMessage(message.c_str());
-	}
-      }
-    }
-    if(ready == 0) break;
-
-    if(servercfg->use_timeout && (!ReadSelect(s->client.GetSocket(), servercfg->timeout_secs, servercfg->timeout_usecs))) {
-      if(servercfg->debug || servercfg->log_level >= 4) {
-	message << clear << "[" << seq_num << "]: Backend read socket timeout after " 
-		<< servercfg->timeout_secs << " secs " << servercfg->timeout_usecs << " usecs";
-	LogMessage(message.c_str());
-      }
-      ready = 0;
-    }
-    else {
-      flags1 = fcntl(s->client.GetSocket(), F_GETFL, 0);
-      fcntl(s->client.GetSocket(), F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client.GetSocket(), buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client.GetSocket(), F_SETFL, flags1); // Set socket back to blocking read
-    }
-    if(ready > 0) {
-      idle_count = 0;
-      br = read(s->client.GetSocket(), buffer, buffer_size);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Backend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	LogMessage(message.c_str());
-      }
-      if(br == 0) {
-	if(servercfg->debug && servercfg->debug_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: " << "Backend socket disconnected duing read()";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(br < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error reading from Backend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      bm = write(s->client_socket, buffer, br);
-      if(servercfg->debug && servercfg->debug_level >= 5) { 
-	get_fd_error(error_number, sbuf);
-	message << clear << "[" << seq_num << "]: " << "Frontend write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	LogDebugMessage(message.c_str());
-      }
-      if(bm < 0) {
-	if(servercfg->log_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Error writing to Frontend socket";
-	  LogMessage(message.c_str());
-	}
-	error_level = 1;
-	break;
-      }
-      if(bm != br) {
-	if(servercfg->log_level >= 3 || servercfg->verbose_level >= 3) {
-	  message << clear << "[" << seq_num << "]: Failed to write " << br << " bytes to Frontend socket, wrote " << bm;
-	  LogMessage(message.c_str());
-	}
-      }
-    }
-    if(ready == 0) break;
-  }
-
-  delete buffer;
-  return error_level;
-}
-
-int LBClientRequestThread::LB_CachedReadWrite(ClientSocket_t *s, int buffer_size)
-{
-  gxString sbuf, message;
-  unsigned seq_num = s->seq_num;
-  char *buffer = new char[buffer_size];
-  int br, bm, flags1, ready, error_number, bytes_read, bytes_moved;
-  int error_level = 0;
-  gxList<MemoryBuffer *> cache;
-  gxListNode<MemoryBuffer *> *ptr = 0;
-  int idle_count = 0;
-  unsigned i;
-
-  unsigned fe_proto_capture_num = 0;
-  unsigned be_proto_capture_num = 0;
-  DiskFileB fepcfile, bepcfile;
-  gxString fepcfile_name, bepcfile_name;
-  int has_valid_ldm_request = 0;
-  int hereis_next = 0;
-  gxString hereis_next_prodIdEre;
-  int reti = 0;
-  gxListNode<LDMallow> *allow_ptr = ldmcfg->ldm_allow_list.GetHead();
-  gxListNode<LDMaccept> *accept_ptr = ldmcfg->ldm_accept_list.GetHead();
-  char net_int[4];
-  memset(net_int, 0, 4);
-
-  while(servercfg->accept_clients) {
-    ready = 1;
-    bytes_read = bytes_moved = 0;
-    if(!servercfg->use_nonblock_sockets) {
-      idle_count++;
-      if(idle_count >= servercfg->max_idle_count) ReadSelect(s->client_socket, servercfg->idle_wait_secs, servercfg->idle_wait_usecs);
-    }
-    while(ready > 0) {
-      flags1 = fcntl(s->client_socket, F_GETFL, 0);
-      fcntl(s->client_socket, F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client_socket, buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client_socket, F_SETFL, flags1); // Set socket back to blocking read
-      if(ready > 0) {
-	idle_count = 0;
-	br = read(s->client_socket, buffer, buffer_size);
-	if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	  get_fd_error(error_number, sbuf);
-	  message << clear << "[" << seq_num << "]: Cached Frondend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(br == 0) {
-	  if(servercfg->debug && servercfg->debug_level >= 5) { 
-	    message << clear << "[" << seq_num << "]: Frontend socket disconnected duing a cached read()";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-	if(br < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error reading from Frontend client socket";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-
-	MemoryBuffer *inbuf = new MemoryBuffer(buffer, br);
-	cache.Add(inbuf);
-	bytes_read += br;
-
-	if(servercfg->enable_buffer_overflow_detection) {
-	  if(bytes_read >= servercfg->buffer_overflow_size) {
-	    if(servercfg->log_level >= 3) {
-	      message << clear << "[" << seq_num << "]: Frontend read " << bytes_read << " bytes from client";
-	      LogMessage(message.c_str());
-	      message << clear << "[" << seq_num << "]: Closing Frontend connection due to buffer overflow";
-	      LogMessage(message.c_str());
-	    }
-	    error_level = 1;
-	    break;
-	  }
-	}
-      }
-    }
-
-    if(error_level != 0) break;
-
-    if(bytes_read > 0) {
-      if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Frondend bytes read: " << bytes_read;
-	LogDebugMessage(message.c_str());
-      }
-
-      if(ldmcfg->enable_frontend_proto_capture) {
-	fepcfile_name << clear << ldmcfg->proto_capture_dir << "/" << "frontend_capture_" <<  seq_num << "_" << ++fe_proto_capture_num << ".bin";
-	if(!fepcfile.df_Exists(ldmcfg->proto_capture_dir.c_str())) fepcfile.df_mkdir(ldmcfg->proto_capture_dir.c_str());
-	fepcfile.df_Create(fepcfile_name.c_str());
-      }
-
-      if(servercfg->debug && servercfg->debug_level > 5) { 
-	ptr = cache.GetHead();
-	MemoryBuffer ldm_request_hdr;
-	while(ptr) {
-	  ldm_request_hdr.Cat(ptr->data->m_buf(),  ptr->data->length());
-	  ptr = ptr->next;
-	}
-	LDMrequest ldm_request;
-	if(ldm_request_hdr.length() >= 28) {
-	  ldm_request.request = (int)ldm_request_hdr[27];
-	  if(set_ldm_request_string(ldm_request.request, ldm_request.request_string) == 0) {
-	      message << clear << "[" << seq_num << "]: DEBUG - Received ldm rpc " 
-		      << ldm_request.request_string << " messsage from " << s->client_name;
-	      LogDebugMessage(message.c_str());
-	  }
-	}
-      }
-
-      if(hereis_next) { // We have processed and ACCEPT for this client
-	ptr = cache.GetHead();
-	MemoryBuffer ldm_request_hdr;
-	while(ptr) {
-	  ldm_request_hdr.Cat(ptr->data->m_buf(),  ptr->data->length());
-	  ptr = ptr->next;
-	}
-	LDMrequest ldm_request;
-	if(ldm_request_hdr.length() >= 28) {
-	  ldm_request.request = (int)ldm_request_hdr[27];
-	  if(set_ldm_request_string(ldm_request.request, ldm_request.request_string) == 0) {
-	    if(servercfg->debug && servercfg->debug_level >= 2) { 
-	      message << clear << "[" << seq_num << "]: Received ldm rpc " 
-		      << ldm_request.request_string << " messsage from " << s->client_name;
-	      LogDebugMessage(message.c_str());
-	    }
-
-	    if(ldm_request.request == HEREIS) { 
-	      if(hereis_next_prodIdEre == "." || hereis_next_prodIdEre == ".*") {
-		if(servercfg->debug && servercfg->debug_level >= 2) { 
-		  message << clear << "[" << seq_num << "]: ACCEPT PROD GRANTED - prodIdEre from " << s->client_name 
-			  << " matches all pattern " <<  hereis_next_prodIdEre;
-		  LogDebugMessage(message.c_str());
-		}
-		hereis_next_prodIdEre.Clear();
-		hereis_next = 0;
-	      }
-	      else {
-		int sizeof_host_name = -1;
-                if(ldm_request_hdr.length() >= 72) {
-                  sizeof_host_name = (int)ldm_request_hdr[71];
-                  if(servercfg->debug && servercfg->debug_level >= 5) {
-                    message << clear << "[" << seq_num << "]: Hostname length " << sizeof_host_name;
-                    LogDebugMessage(message.c_str());
-                  }
-                  if(ldm_request_hdr.length() >= (72+sizeof_host_name)) {
-                    char *host_name = new char[sizeof_host_name+1];
-                    memset(host_name, 0, (sizeof_host_name+1));
-                    memcpy(host_name, (ldm_request_hdr.m_buf()+72), sizeof_host_name);
-                    if(servercfg->debug && servercfg->debug_level >= 5) {
-                      message << clear << "[" << seq_num << "]: Originating host " << host_name;
-                      LogDebugMessage(message.c_str());
-                    }
-                    delete host_name;
-		  }
-		}
-		int offset1 = (72+sizeof_host_name) + 13;
-		int offset = -1;
-		if(ldm_request_hdr.length() >= offset1 && sizeof_host_name != -1) {
-		  offset = 72+sizeof_host_name;
-		  int count = 72+sizeof_host_name;
-		  int offset2 = 0;
-		  while((char)ldm_request_hdr[count++] != '@' && count < offset1) offset2++;
-		  if(count < offset1) offset = count + 11;
-		}
-		int sizeof_file_name = 0;
-		if(offset != -1 && ldm_request_hdr.length() >= offset && sizeof_host_name) {
-		  sizeof_file_name = (int)ldm_request_hdr[offset-1];
-		  if(servercfg->debug && servercfg->debug_level >= 5) { 
-		    message << clear << "[" << seq_num << "]: Product file name length " << sizeof_file_name; 
-		    LogDebugMessage(message.c_str());
-		  }
-		  if(ldm_request_hdr.length() >= (offset+sizeof_file_name)) {
-		    char *file_name = new char[sizeof_file_name+1]; 
-		    memset(file_name, 0, (sizeof_file_name+1));
-		    memcpy(file_name, (ldm_request_hdr.m_buf()+offset), sizeof_file_name);
-		    if(servercfg->debug && servercfg->debug_level >= 5) { 
-		      message << clear << "[" << seq_num << "]: " << file_name; 
-		      LogDebugMessage(message.c_str());
-		    }
-		    gxString str = file_name;
-		    int rv_regex = compare_ldm_regex(hereis_next_prodIdEre, str);
-		    hereis_next = 0;
-		    delete file_name;
-		    if(rv_regex == 0) {
-		      if(servercfg->debug && servercfg->debug_level >= 2) { 
-			message << clear << "[" << seq_num << "]: ACCEPT PROD GRANTED - prodIdEre from " << s->client_name 
-				<< " matches " <<  hereis_next_prodIdEre;
-			LogDebugMessage(message.c_str());
-		      }
-		      hereis_next_prodIdEre.Clear();
-		    }
-		    else {
-		      message << clear << "[" << seq_num << "]: ACCEPT PROD DENIED - prodIdEre from " << s->client_name 
-			      << " does not match " <<  hereis_next_prodIdEre;
-		      LogMessage(message.c_str());
-		      has_valid_ldm_request = 0;
-		      error_level = 1;
-		      break; // exit main loop
-		    }
-		  }
-		}
-	      }
-	    }
-	    ldm_request_hdr.Clear();
-	  }
-	}
-      }
-
-      if(!has_valid_ldm_request) {
-	// Read the front-end LDM request coming from the remote client
-	ptr = cache.GetHead();
-	MemoryBuffer ldm_request_hdr;
-	while(ptr) {
-	  ldm_request_hdr.Cat(ptr->data->m_buf(),  ptr->data->length());
-	  ptr = ptr->next;
-	}
-	
-	LDMrequest ldm_request;
-	if(ldm_request_hdr.length() >= 28) {
-	  ldm_request.request = (int)ldm_request_hdr[27];
-	  if(set_ldm_request_string(ldm_request.request, ldm_request.request_string) == 0) {
-	    if(servercfg->debug && servercfg->debug_level >= 2) { 
-	      message << clear << "[" << seq_num << "]: Received ldm rcp " 
-		      << ldm_request.request_string << " messsage from " << s->client_name;
-	      LogDebugMessage(message.c_str());
-	    }
-	  }
-	  else {
-	    if(servercfg->debug && servercfg->debug_level >= 2) { 
-	      message << clear << "[" << seq_num << "]: ERROR Received unknown ldm rpc message " 
-		      <<  ldm_request.request << " from " << s->client_name;
-	      LogDebugMessage(message.c_str());
-	    }
-	    message << clear << "[" << seq_num << "]: ALLOW DENIED - unknown ldm rpc message from " << s->client_name;  
-	    LogMessage(message.c_str());
-	    has_valid_ldm_request = 0;
-	    error_level = 1;
-	    break; // exit main loop
-	  }
-	}
-
-	if(ldm_request.request == NOTIFYME) {
-	  has_valid_ldm_request = 1;
-	}
-
-	if(ldm_request.request == FEEDME || ldm_request.request == HIYA) { 
-	  if(ldm_request_hdr.length() >= 68) {
-	    memcpy(net_int, (ldm_request_hdr.m_buf()+64), 4);
-	  }
-	  else {
-	    message << clear << "[" << seq_num << "]: ALLOW DENIED - bad message length cannot read feed type from " << s->client_name;  
-	    LogMessage(message.c_str());
-	    has_valid_ldm_request = 0;
-	    error_level = 1;
-	    break; // exit main loop
-	  }
-	  ldm_request.SetFeedType(net_int);
-	  if(set_ldm_feed_type_strings(ldm_request.feed_type, ldm_request.feed_type_strings) == 0) {
-	    if(servercfg->debug && servercfg->debug_level >= 2) { 
-	      message << clear << "[" << seq_num << "]: Received ldm " << ldm_request.request_string 
-		      << " for queue " << ldm_request.feed_type_strings << " from " << s->client_name;
-	      LogDebugMessage(message.c_str());
-	    }
-	    
-	    // Check to see if we have allow access to this feed
-	    if(ldm_request.request == FEEDME) {
-	      int has_ip_allow = 0;
-	      int has_queue_allow = 0;
-	      int check_patterns = 0;
-	      gxString m_buf, OK_pattern, NOT_pattern, request_name_str;
-
-	      // Check against ALLOW list
-	      allow_ptr = ldmcfg->ldm_allow_list.GetHead();
-	      OK_pattern.Clear();
-	      NOT_pattern.Clear();
-	      while(allow_ptr) {
-		reti = compare_ldm_hostere_to_hostip(allow_ptr->data.hostIdEre, s->client_name, 
-						     s->seq_num, has_ip_allow, ldmcfg->resolve_ldm_hostnames);
-		if(reti == 0) {
-		  ldm_check_queue_access(allow_ptr->data.feedtype, ldm_request.feed_type_strings, has_queue_allow, m_buf);
-		  if(has_queue_allow) {
-		    if(!allow_ptr->data.OK_pattern.is_null()) {
-		      check_patterns = 1;
-		      OK_pattern = allow_ptr->data.OK_pattern;
-		    }
-		    if(!allow_ptr->data.NOT_pattern.is_null()) {
-		      if(!allow_ptr->data.OK_pattern.is_null()) check_patterns = 1;
-		      NOT_pattern = allow_ptr->data.NOT_pattern;
-		    }
-		    break;
-		  }
-		}
-		allow_ptr = allow_ptr->next;
-	      }
-	      if(!has_queue_allow) {
-		message << clear << "[" << seq_num << "]: ALLOW DENIED - " << m_buf << " from " << s->client_name;  
-		LogMessage(message.c_str());
-		has_valid_ldm_request = 0;
-		error_level = 1;
-		break; // exit main loop
-	      }
-	      else {
-		if(check_patterns) {
-		  int sizeof_request = 0;
-		  if(ldm_request_hdr.length() >= 72) {
-		    sizeof_request = (int)ldm_request_hdr[71];
-		    if(servercfg->debug && servercfg->debug_level >= 5) { 
-		      message << clear << "[" << seq_num << "]: Request length " << sizeof_request; 
-		      LogDebugMessage(message.c_str());
-		    }
-		    if(ldm_request_hdr.length() >= (72+sizeof_request)) {
-		      char *request_name = new char[sizeof_request+1]; 
-		      memset(request_name, 0, (sizeof_request+1));
-		      memcpy(request_name, (ldm_request_hdr.m_buf()+72), sizeof_request);
-		      request_name_str = request_name;
-		      delete request_name;
-		      if(servercfg->debug && servercfg->debug_level >= 5) { 
-			message << clear << "[" << seq_num << "]: " << request_name_str; 
-			LogDebugMessage(message.c_str());
-		      }
-		    }
-		    else {
-		      check_patterns = 0;
-		    }
-		  }
-		  else {
-		    check_patterns = 0;
-		  }
-		}
-		if(check_patterns) {
-		  if(servercfg->debug && servercfg->debug_level >= 2) { 
-		    message << clear << "[" << seq_num << "]: Checking OK and NOT patterns";
-		    LogDebugMessage(message.c_str());
-		  }
-		  if(compare_ldm_regex(OK_pattern, request_name_str) == 0) {
-		    if(servercfg->debug && servercfg->debug_level >= 2) { 
-		      message << clear << "[" << seq_num << "]: Request from " << s->client_name 
-			      << " matches OK pattern " << OK_pattern;
-		      LogDebugMessage(message.c_str());
-		    }
-		    if(!NOT_pattern.is_null()) {
-		      if(compare_ldm_regex(NOT_pattern, request_name_str) == 0) {
-			message << clear << "[" << seq_num << "]: ALLOW DENIED - request from " << s->client_name 
-				<< " matches NOT pattern " << NOT_pattern;
-			LogMessage(message.c_str());
-			has_valid_ldm_request = 0;
-			error_level = 1;
-			break; // exit main loop
-		      }
-		    }
-		  }
-		  else {
-		    message << clear << "[" << seq_num << "]: ALLOW DENIED - request from " << s->client_name 
-			    << " does not match OK pattern " << OK_pattern;
-		    LogMessage(message.c_str());
-		    has_valid_ldm_request = 0;
-		    error_level = 1;
-		    break; // exit main loop
-		  }
-		}
-		has_valid_ldm_request = 1;
-		if(servercfg->debug && servercfg->debug_level >= 2) { 
-		  message << clear << "[" << seq_num << "]: ALLOW GRANTED - " << m_buf;
-		  LogDebugMessage(message.c_str());
-		}
-	      }
-	    }
-
-	    // Check to see if we have accept access to this queue
-	    if(ldm_request.request == HIYA) {
-	      hereis_next_prodIdEre.Clear();
-	      int has_ip_accept = 0;
-	      int has_queue_accept = 0;
-	      gxString m_buf;
-	      // Check against ACCEPT list
-	      accept_ptr = ldmcfg->ldm_accept_list.GetHead();
-	      while(accept_ptr) {
-		reti = compare_ldm_hostere_to_hostip(accept_ptr->data.hostIdEre, s->client_name, 
-						     s->seq_num, has_ip_accept, ldmcfg->resolve_ldm_hostnames);
-		if(reti == 0) {
-		  ldm_check_queue_access(accept_ptr->data.feedtype, ldm_request.feed_type_strings, has_queue_accept, m_buf);
-		  if(has_queue_accept) {
-		    hereis_next_prodIdEre = accept_ptr->data.prodIdEre;
-		    break;
-		  }
-		}
-		accept_ptr = accept_ptr->next;
-	      }
-	      if(!has_queue_accept) {
-		message << clear << "[" << seq_num << "]: ACCEPT DENIED - " << m_buf << " from " << s->client_name;  
-		LogMessage(message.c_str());
-		has_valid_ldm_request = 0;
-		error_level = 1;
-		break; // exit main loop
-	      }
-	      else {
-		has_valid_ldm_request = 1;
-		hereis_next = 1;
-		if(servercfg->debug && servercfg->debug_level >= 2) { 
-		  message << clear << "[" << seq_num << "]: ACCEPT GRANTED - " << m_buf;
-		  LogDebugMessage(message.c_str());
-		}
-	      }
-	    }
-	    
-	  }
-	  else {
-	    if(servercfg->debug && servercfg->debug_level >= 2) { 
-	      message << clear << "[" << seq_num << "]: ERROR Received ldm " << ldm_request.request_string << " for unknown feed type " 
-		      << ldm_request.feed_type << " from " << s->client_name;
-	      LogDebugMessage(message.c_str());
-
-	    }
-	    if(ldm_request.request == FEEDME) {
-	      message << clear << "[" << seq_num << "]: ALLOW DENIED - unknown feed type from " << s->client_name;  
-	    }
-	    if(ldm_request.request == HIYA) {
-	      message << clear << "[" << seq_num << "]: ACCEPT DENIED - unknown feed type from " << s->client_name;  
-	    }
-	    LogMessage(message.c_str());
-	    has_valid_ldm_request = 0;
-	    error_level = 1;
-	    break; // exit main loop
-	  }
-	}
-
-	ldm_request_hdr.Clear();
-      }
-
-      ptr = cache.GetHead();
-      while(ptr) {
-	if(servercfg->enable_http_forwarding) {
-	  for(i = 0; i < servercfg->num_http_requests; i++) {
-	    if(ptr->data->Find((char *)servercfg->http_requests[i].c_str(), servercfg->http_requests[i].length(), 0) != __MEMBUF_NO_MATCH__) {
-	      if((ptr->data->Find((char *)servercfg->http_hdr_str.c_str(), servercfg->http_hdr_str.length(), 0) != __MEMBUF_NO_MATCH__) &&
-		 (ptr->data->Find((char *)servercfg->http_eol.c_str(), servercfg->http_eol.length(), 0) != __MEMBUF_NO_MATCH__)) {
-		gxString ff;
-		ff << clear << servercfg-> http_forward_for_str << ": " << s->client_name << "\r\n";
-		unsigned offset = ptr->data->Find((char *)servercfg->http_eoh.c_str(), servercfg->http_eoh.length(), 0);
-		if(offset == __MEMBUF_NO_MATCH__) {
-		  ptr->data->Cat((void *)ff.c_str(), ff.length());
-		}
-		else {
-		  ptr->data->InsertAt((offset+2), (void *)ff.c_str(), ff.length());
-		}
-	      }
-	    }
-	  }
-	}
-
-	if(ldmcfg->enable_frontend_proto_capture) {
-	  if(fepcfile) {
-	    fepcfile.df_Write(ptr->data->m_buf(), ptr->data->length());
-	    fepcfile.df_Flush();
-	  }
-	}
-
-	if(ptr->data->length() > 0) {
-	  bm = write(s->client.GetSocket(), ptr->data->m_buf(), ptr->data->length());
-	  get_fd_error(error_number, sbuf);
-	}
-	else {
-	  bm = 0;
-	  fd_error_to_string(0, sbuf);	  
-	}
-	if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: Backend cached write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(bm > 0) bytes_moved += bm;
-	if(bm < 0 && error_number == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	  bm = bytes_moved;
-	  break;
-	}
-	if(bm < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error writing to Backend socket";
-	    LogMessage(message.c_str());
-	    if(servercfg->debug && servercfg->debug_level >= 5) { 
-	      message << clear << "[" << seq_num << "]: Backend write " << bm << " ERROR: " << error_number << ": " << sbuf;
-	      LogMessage(message.c_str());
-	    }
-	    error_level = 1;
-	    break;
-	  }
-	}
-	if(error_level != 0) break;
-	ptr = ptr->next;
-      }
-      if(ldmcfg->enable_frontend_proto_capture) {
-	if(fepcfile) {
-	  fepcfile.df_Close();
-	}
-      }
-      if(error_level != 0) break;
-      if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Backend bytes moved: " << bytes_moved;
-	LogDebugMessage(message.c_str());
-      }
-      ptr = cache.GetHead();
-      while(ptr) {
-	delete ptr->data;
-	ptr->data = 0;
-	ptr = ptr->next;
-      }
-      cache.ClearList();
-    }
-    if(error_level != 0) break;
-    if(ready == 0) break;
-
-    ready = 1;
-    bytes_read = bytes_moved = 0;
-    while(ready > 0) {
-      flags1 = fcntl(s->client.GetSocket(), F_GETFL, 0);
-      fcntl(s->client.GetSocket(), F_SETFL, flags1 | O_NONBLOCK); // Set read not to block
-      ready = recv(s->client.GetSocket(), buffer, buffer_size, MSG_PEEK); 
-      if(errno == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	errno = 0;
-      }
-      fcntl(s->client.GetSocket(), F_SETFL, flags1); // Set socket back to blocking read
-      if(ready > 0) {
-	idle_count = 0;
-	br = read(s->client.GetSocket(), buffer, buffer_size);
-	if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	  get_fd_error(error_number, sbuf);
-	  message << clear << "[" << seq_num << "]: Cached Backend read() Return: " << br << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(br == 0) {
-	  if(servercfg->debug && servercfg->debug_level >= 5) { 
-	    message << clear << "[" << seq_num << "]: Backend socket disconnected duing a cached read()";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-	if(br < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error reading from Backend client socket";
-	    LogMessage(message.c_str());
-	  }
-	  bytes_read = 0;
-	  error_level = 1;
-	  break;
-	}
-	MemoryBuffer *inbuf = new MemoryBuffer(buffer, br);
-	cache.Add(inbuf);
-	bytes_read += br;
-      }
-    }
-
-    if(error_level != 0) break;
-
-    if(bytes_read > 0) {
-      if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Backend bytes read: " << bytes_read;
-	LogDebugMessage(message.c_str());
-      }
-
-      if(ldmcfg->enable_backend_proto_capture) {
-	bepcfile_name << clear << ldmcfg->proto_capture_dir << "/" << "backend_capture_" <<  seq_num << "_" << ++be_proto_capture_num << ".bin";
-	if(!bepcfile.df_Exists(ldmcfg->proto_capture_dir.c_str())) bepcfile.df_mkdir(ldmcfg->proto_capture_dir.c_str());
-	bepcfile.df_Create(bepcfile_name.c_str());
-      }
-
-      ptr = cache.GetHead();
-      while(ptr) {
-
-	if(ldmcfg->enable_backend_proto_capture) {
-	  if(bepcfile) {
-	    bepcfile.df_Write(ptr->data->m_buf(), ptr->data->length());
-	    bepcfile.df_Flush();
-	  }
-	}
-
-	if(ptr->data->length() > 0) {
-	  bm = write(s->client_socket, ptr->data->m_buf(), ptr->data->length());
-	  get_fd_error(error_number, sbuf);
-	}
-	else {
-	  bm = 0;
-	  fd_error_to_string(0, sbuf);	  
-	}
-	if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	  message << clear << "[" << seq_num << "]: Frontend cached write() Return: " << bm << " ENUM: " << error_number << " Message: " << sbuf;
-	  LogDebugMessage(message.c_str());
-	}
-	if(bm > 0) bytes_moved += bm;
-	if(bm < 0 && error_number == EAGAIN) { // EAGAIN and EWOULDBLOCK are the same value
-	  bm = bytes_moved;
-	  break;
-	}
-	if(bm < 0) {
-	  if(servercfg->log_level >= 3) {
-	    message << clear << "[" << seq_num << "]: Error writing to Frontend socket";
-	    LogMessage(message.c_str());
-	    if(servercfg->debug && servercfg->debug_level >= 5) { 
-	      message << clear << "[" << seq_num << "]: Frontend write " << bm << " ERROR: " << error_number << ": " << sbuf;
-	      LogMessage(message.c_str());
-	    }
-	    error_level = 1;
-	    break;
-	  }
-	}
-	if(error_level != 0) break;
-	ptr = ptr->next;
-      }
-      if(ldmcfg->enable_backend_proto_capture) {
-	if(bepcfile) {
-	  bepcfile.df_Close();
-	}
-      }
-      if(error_level != 0) break;
-      if(servercfg->debug && servercfg->debug_level >= 5 && servercfg->verbose_level >= 5) { 
-	message << clear << "[" << seq_num << "]: Cached Frontend bytes moved: " << bytes_moved;
-	LogDebugMessage(message.c_str());
-      }
-      ptr = cache.GetHead();
-      while(ptr) {
-	delete ptr->data;
-	ptr->data = 0;
-	ptr = ptr->next;
-      }
-      cache.ClearList();
-    }
-    if(error_level != 0) break;
-    if(ready == 0) break;
-  }
-
-  ptr = cache.GetHead();
-  while(ptr) {
-    delete ptr->data;
-    ptr->data = 0;
-    ptr = ptr->next;
-  }
-  cache.ClearList();
-  delete buffer;
-  return error_level;
 }
 
 LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s)
@@ -1333,6 +540,7 @@ LBnode *LBClientRequestThread::round_robin(ClientSocket_t *s,  gxList<LBnode *> 
 	init_error = 1;
       }
       if(init_error == 0) {
+	SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
 	if(client->Connect() < 0) {
 	  if(servercfg->log_level >= 1) {
 	    sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot connect to backend host " 
@@ -1543,6 +751,7 @@ LBnode *LBClientRequestThread::assigned(ClientSocket_t *s)
       }
       return 0;
     }
+    SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
     if(client->Connect() < 0) {
       sbuf << clear << "[" << seq_num << "]: ERROR - " << ptr->data->node_name << " cannot connect to " 
 	   << ptr->data->hostname << " port " << ptr->data->port_number;
@@ -1645,6 +854,7 @@ LBnode *LBClientRequestThread::distrib(ClientSocket_t *s)
     }
     return round_robin(s, servercfg->distributed_rr_node_list);
   }
+  SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
   if(client->Connect() < 0) {
     sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name << " cannot connect to " 
 	 << limit_ptr->data.active_ptr->hostname << " port " << limit_ptr->data.active_ptr->port_number;
@@ -1752,6 +962,7 @@ LBnode *LBClientRequestThread::weighted(ClientSocket_t *s)
     }
     return round_robin(s, servercfg->weighted_rr_node_list);
   }
+  SetSocketTimeouts(client->GetSocket(), servercfg->connect_timeout_secs, -1);
   if(client->Connect() < 0) {
     sbuf << clear << "[" << seq_num << "]: ERROR - " << limit_ptr->data.active_ptr->node_name << " cannot connect to " 
 	 << limit_ptr->data.active_ptr->hostname << " port " << limit_ptr->data.active_ptr->port_number;

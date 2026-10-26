@@ -10,6 +10,7 @@ URL: https://datareel.com/drlb/ldm.html
 Vendor: Datareel Open Source
 Requires: systemd
 Requires: bash
+Requires(pre): shadow-utils
 Recommends: NetworkManager
 Recommends: firewalld
 
@@ -21,7 +22,7 @@ tar xvf drlb_ldm_server.tar.gz -C $RPM_BUILD_ROOT
 
 %files
 %dir %attr(0755, root, root) "/etc/drlb"
-%dir %attr(0755, root, root) "/var/log/drlb"
+%dir %attr(0750, drlb, drlb) "/var/log/drlb"
 %attr(0755, root, root) "/usr/sbin/drlb_ldm_server"
 %config(noreplace) %attr(0644, root, root) "/etc/sysconfig/drlb_ldm_server"
 %config(noreplace) %attr(0644, root, root) "/etc/drlb/ldm_cluster.cfg"
@@ -34,6 +35,13 @@ tar xvf drlb_ldm_server.tar.gz -C $RPM_BUILD_ROOT
 %attr(0644, root, root) "/usr/lib/systemd/system/drlb_ldm_server.service"
 %dir %attr(0755, root, root) "/usr/libexec/drlb"
 %attr(0755, root, root) "/usr/libexec/drlb/drlb_platform_check"
+
+%pre -p /bin/sh
+
+# 10/25/2026: The servers run as the drlb system user
+getent group drlb >/dev/null || groupadd -r drlb
+getent passwd drlb >/dev/null || useradd -r -g drlb -d /var/log/drlb -s /sbin/nologin -c "DataReel load balancer" drlb
+exit 0
 
 %post -p /bin/sh
 
@@ -64,6 +72,7 @@ fi
 - RHEL 9 and RHEL 10 builds; RHEL 8 only with NetworkManager and firewalld
 - RHEL 6 and RHEL 7 support removed
 - Native systemd units in /usr/lib/systemd/system, SysV init script removed
+- Servers run as the drlb user with systemd sandboxing
 * Mon Feb 05 2024 Datareel <datareel.com>
 - Updates for RHEL 8 and RHEL 9 builds
 * Tue Oct 24 2016 Datareel <datareel.com>

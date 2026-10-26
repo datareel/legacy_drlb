@@ -95,7 +95,7 @@ LBconfig::LBconfig()
   retry_wait = 1;
   timeout_secs = 300;
   timeout_usecs = 0;
-  use_timeout = 0;
+  use_timeout = 1; // 10/25/2026: Idle connections time out by default
   server_accept_socket = -1;
   somaxconn = 128;
   connection_total_is_locked = 0;
@@ -136,10 +136,9 @@ LBconfig::LBconfig()
   is_client_interactive = 0;
   check_config = 0;
   log_file_err = 0;
-  max_idle_count = 60000;
-  idle_wait_secs = 0;
-  idle_wait_usecs = 500;
-  use_nonblock_sockets = 0;
+  write_timeout_secs = 60;
+  connect_timeout_secs = 5;
+  max_cache_size = 1048576;
   process_thread = 0;
   process_loop = 1;
   process_is_locked = 0;
@@ -262,8 +261,10 @@ int LBconfig::QUEUE_NODE_COUNT()
   queue_node_count_is_locked = 1; 
 
   // ********** Enter Critical Section ******************* //
-  if(queue_node_count == log_queue_size) queue_node_count = 0; 
+  // 10/25/2026: Each queue wraps at its own size. The debug and proc
+  // queues used log_queue_size and indexed past the end of their arrays.
   queue_node_count++;
+  if(queue_node_count < 0 || queue_node_count >= log_queue_size) queue_node_count = 0;
   int buf = queue_node_count;
   // ********** Leave Critical Section ******************* //
 
@@ -280,8 +281,10 @@ int LBconfig::QUEUE_DEBUG_COUNT()
   queue_debug_count_is_locked = 1;
 
   // ********** Enter Critical Section ******************* //
-  if(queue_debug_count == log_queue_size) queue_debug_count = 0; 
+  // 10/25/2026: Each queue wraps at its own size. The debug and proc
+  // queues used log_queue_size and indexed past the end of their arrays.
   queue_debug_count++;
+  if(queue_debug_count < 0 || queue_debug_count >= log_queue_debug_size) queue_debug_count = 0;
   int buf = queue_debug_count;
   // ********** Leave Critical Section ******************* //
 
@@ -298,8 +301,10 @@ int LBconfig::QUEUE_PROC_COUNT()
   queue_proc_count_is_locked = 1; 
 
   // ********** Enter Critical Section ******************* //
-  if(queue_proc_count == log_queue_size) queue_proc_count = 0; 
+  // 10/25/2026: Each queue wraps at its own size. The debug and proc
+  // queues used log_queue_size and indexed past the end of their arrays.
   queue_proc_count++;
+  if(queue_proc_count < 0 || queue_proc_count >= log_queue_proc_size) queue_proc_count = 0;
   int buf = queue_proc_count;
   // ********** Leave Critical Section ******************* //
 
@@ -678,12 +683,13 @@ int CfgGetEqualToParm(const gxString &cfgline)
   return parm.Atoi();
 }
 
-char *CfgGetEqualToParm(const gxString &cfgline, char sbuf[255])
+char *CfgGetEqualToParm(const gxString &cfgline, char sbuf[CFG_VALUE_SIZE])
 {
-  memset(sbuf, 0, 255);
+  // 10/25/2026: Bounded copy, the old 255 byte buffer overflowed on long values
+  memset(sbuf, 0, CFG_VALUE_SIZE);
   gxString parm;
   CfgGetEqualToParm(cfgline, parm);
-  strcpy(sbuf, parm.c_str());
+  strncpy(sbuf, parm.c_str(), CFG_VALUE_SIZE-1);
   return sbuf;
 }
 
@@ -768,20 +774,20 @@ int LoadOrBuildConfigFile()
     dfile << "retries = 3" << "\n";
     dfile << "retry_wait = 1" << "\n";
     dfile << "#" << "\n";
-    dfile << "# Use timeout on blocking reads" << "\n";
-    dfile << "use_timeout = 0" << "\n";
+    dfile << "# Close connections with no data in either direction for timeout_secs" << "\n";
+    dfile << "use_timeout = 1" << "\n";
     dfile << "timeout_secs = 300" << "\n";
     dfile << "timeout_usecs = 0" << "\n";
     dfile << "#" << "\n";
+    dfile << "# Seconds to wait for a slow peer to accept data, and to connect to a node" << "\n";
+    dfile << "write_timeout_secs = 60" << "\n";
+    dfile << "connect_timeout_secs = 5" << "\n";
+    dfile << "#" << "\n";
+    dfile << "# Max bytes read from one side before they are written to the other side" << "\n";
+    dfile << "max_cache_size = 1048576" << "\n";
+    dfile << "#" << "\n";
     dfile << "# Service name that appears in log file" << "\n";
     dfile << "##service_name = drlb_server" << "\n";
-    dfile << "#" << "\n";
-    dfile << "# Idle time for blocking sockets" << "\n";
-    dfile << "max_idle_count = 60000" << "\n";
-    dfile << "idle_wait_secs = 0"  << "\n";
-    dfile << "idle_wait_usecs = 500" << "\n";
-    dfile << "# Use non-blocking sockets" << "\n";
-    dfile << "use_nonblock_sockets = 0" << "\n";
     dfile << "#" << "\n";
     dfile << "# " << "\n";
     dfile << "# Settings for throttling connections" << "\n";
@@ -905,7 +911,7 @@ int LoadOrBuildConfigFile()
   int has_lbserver = 0;
   int has_lbnode = 0;
   ptr = list.GetHead();
-  char pbuf[255];
+  char pbuf[CFG_VALUE_SIZE];
   gxString parm;
   int has_scheme = 0;
   gxString parm_name;
@@ -1129,10 +1135,13 @@ int LoadOrBuildConfigFile()
 	  }
 	}
 	if(ptr->data.IFind("timeout_secs") != -1) {
-	  servercfg->timeout_secs = CfgGetEqualToParm(ptr->data);
-	  if(servercfg->timeout_secs < 0) {
-	    NT_print("Config file has bad timeout_secs value");
-	    error_level = 1;
+	  CfgGetParmName(ptr->data, parm_name); parm_name.ToLower();
+	  if(parm_name == "timeout_secs") {
+	    servercfg->timeout_secs = CfgGetEqualToParm(ptr->data);
+	    if(servercfg->timeout_secs < 0) {
+	      NT_print("Config file has bad timeout_secs value");
+	      error_level = 1;
+	    }
 	  }
 	}
 	if(ptr->data.IFind("timeout_usecs") != -1) {
@@ -1142,27 +1151,24 @@ int LoadOrBuildConfigFile()
 	    error_level = 1;
 	  }
 	}
-	if(ptr->data.IFind("use_nonblock_sockets") != -1) {
-	  servercfg->use_nonblock_sockets = CfgGetTrueFalseValue(ptr->data);
-	}
-	if(ptr->data.IFind("max_idle_count") != -1) {
-	  servercfg->max_idle_count = CfgGetEqualToParm(ptr->data);
-	  if(servercfg->max_idle_count < 0) {
-	    NT_print("Config file has bad max_idle_count value");
+	if(ptr->data.IFind("write_timeout_secs") != -1) {
+	  servercfg->write_timeout_secs = CfgGetEqualToParm(ptr->data);
+	  if(servercfg->write_timeout_secs <= 0) {
+	    NT_print("Config file has bad write_timeout_secs value");
 	    error_level = 1;
 	  }
 	}
-	if(ptr->data.IFind("idle_wait_secs") != -1) {
-	  servercfg->idle_wait_secs = CfgGetEqualToParm(ptr->data);
-	  if(servercfg->idle_wait_secs < 0) {
-	    NT_print("Config file has bad idle_wait_secs value");
+	if(ptr->data.IFind("connect_timeout_secs") != -1) {
+	  servercfg->connect_timeout_secs = CfgGetEqualToParm(ptr->data);
+	  if(servercfg->connect_timeout_secs <= 0) {
+	    NT_print("Config file has bad connect_timeout_secs value");
 	    error_level = 1;
 	  }
 	}
-	if(ptr->data.IFind("idle_wait_usecs") != -1) {
-	  servercfg->idle_wait_usecs = CfgGetEqualToParm(ptr->data);
-	  if(servercfg->idle_wait_usecs < 0) {
-	    NT_print("Config file has bad idle_wait_usecs value");
+	if(ptr->data.IFind("max_cache_size") != -1) {
+	  servercfg->max_cache_size = CfgGetEqualToParm(ptr->data);
+	  if(servercfg->max_cache_size <= 0) {
+	    NT_print("Config file has bad max_cache_size value");
 	    error_level = 1;
 	  }
 	}

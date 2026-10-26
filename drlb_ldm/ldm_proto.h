@@ -40,6 +40,11 @@ LDM protcol plug in for DR load balancer.
 
 #include "ldm_rpc_messages.h"
 #include "ldm_feed_types.h"
+#include "m_relay.h"
+#include "gxlist.h"
+
+struct LDMallow;
+struct LDMaccept;
 
 struct LDMrequest {
   LDMrequest() {
@@ -66,6 +71,57 @@ struct LDMrequest {
 
 int set_ldm_request_string(int ldm_request, gxString &s);
 int set_ldm_feed_type_strings(unsigned int ldm_feed_type, gxString &s);
+
+// 10/25/2026: Convert an ldmd.conf feed type expression, such as
+// "IDS|DDPLUS", "ANY-NEXRAD2" or "WMO", to a feed type bit mask.
+// Returns 0 if the expression is valid.
+int ldm_feed_expr_to_mask(const gxString &expr, unsigned int &mask);
+
+// 10/25/2026: Relay filter that checks every LDM RPC message a frontend
+// client sends against the ALLOW and ACCEPT entries in ldmd.conf, and
+// writes the optional protocol capture files.
+//
+// Messages are parsed with their ONC RPC record marks and XDR encoding,
+// so checks do not depend on how TCP splits the stream:
+// - The first call must be FEEDME, NOTIFYME, HIYA, IS_ALIVE or NULLPROC.
+// - FEEDME and NOTIFYME need ALLOW entries for this host that cover
+//   every requested feed type of every product specification, and the
+//   request patterns must pass the entries' OK and NOT patterns.
+// - HIYA needs ACCEPT entries that cover every offered feed type.
+// - After HIYA, every HEREIS and COMINGSOON product must match the feed
+//   type and prodIdEre of an ACCEPT entry for this host. BLKDATA is only
+//   passed after an accepted COMINGSOON.
+// - Other calls, or calls out of this order, close the connection.
+class LdmFilter : public RelayFilter
+{
+public:
+  LdmFilter();
+  ~LdmFilter();
+
+public:
+  int Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, MemoryBuffer &out);
+
+private:
+  int check_record(ClientSocket_t *s, const unsigned char *p, unsigned len);
+  int check_feed_request(ClientSocket_t *s, int proc, const unsigned char *p, unsigned len, unsigned pos);
+  int check_hiya(ClientSocket_t *s, const unsigned char *p, unsigned len, unsigned pos);
+  int check_product(ClientSocket_t *s, const char *what, const unsigned char *p, unsigned len, unsigned pos);
+  void capture(ClientSocket_t *s, int from_frontend, const char *buf, int bytes);
+  int deny(ClientSocket_t *s, const gxString &why);
+  void match_host_entries(ClientSocket_t *s);
+
+private:
+  enum { LDM_START, LDM_FEEDING, LDM_ACCEPTING };
+  int state;
+  int blkdata_ok;          // Last COMINGSOON was accepted
+  MemoryBuffer pending;    // Frontend bytes held until a record can be checked
+  unsigned frag_remaining; // Bytes of the current fragment still to pass
+  int in_continuation;     // The current record has more fragments
+  int capture_fd[2];       // Backend, frontend capture files
+  int host_matched;        // host_allow and host_accept are set
+  gxList<LDMallow *> host_allow;   // ALLOW entries matching this client
+  gxList<LDMaccept *> host_accept; // ACCEPT entries matching this client
+};
 
 #endif // __LDM_PROTO_HPP__
 // ----------------------------------------------------------- // 

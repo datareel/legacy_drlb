@@ -54,7 +54,7 @@ LDMconfig::LDMconfig()
   resolve_ldm_hostnames = 1;
   enable_frontend_proto_capture = 0;
   enable_backend_proto_capture = 0;
-  proto_capture_dir = "/tmp/ldm_proto_capture";
+  proto_capture_dir = "/var/log/drlb/ldm_proto_capture";
 }
 
 LDMconfig::~LDMconfig() 
@@ -80,7 +80,7 @@ int LoadLDMConfig()
   UString info_line, sbuf, parm_name;
   int error_level = 0;
   gxList<gxString> filelist;
-  char pbuf[255];
+  char pbuf[CFG_VALUE_SIZE];
   int filter_linefeeds = 0;
 
   while(!ifile.df_EOF()) {
@@ -131,7 +131,7 @@ int LoadLDMConfig()
     dfile << "# For development and testing" << "\n";
     dfile << "## enable_frontend_proto_capture = 0" << "\n";
     dfile << "## enable_backend_proto_capture = 0" << "\n";
-    dfile << "## proto_capture_dir = /tmp/ldm_proto_capture" << "\n";
+    dfile << "## proto_capture_dir = /var/log/drlb/ldm_proto_capture" << "\n";
     dfile << "#" << "\n";
     dfile << "\n";
     ptr = filelist.GetHead();
@@ -412,6 +412,13 @@ int parse_ldm_config(gxList<gxString> &conf_lines)
 	LDMaccept ldm_accept;
 	ldm_accept.Reset();
 	ldm_accept.feedtype = vals[1];
+	{
+	  unsigned int feed_mask = 0; // 10/25/2026: Feed types are checked as bit masks
+	  if(ldm_feed_expr_to_mask(ldm_accept.feedtype, feed_mask) != 0) {
+	    NT_print("ERROR - LDM conf ACCEPT unknown feed type:", line.c_str());
+	    error_level = 2;
+	  }
+	}
 	ldm_accept.prodIdEre = vals[2];	fix_regex_quotes(ldm_accept.prodIdEre);
 	ldm_accept.hostIdEre = vals[3]; fix_regex_quotes(ldm_accept.hostIdEre);
 	reti = regcomp(&regex, ldm_accept.prodIdEre.c_str(), REG_EXTENDED|REG_NOSUB);
@@ -453,6 +460,13 @@ int parse_ldm_config(gxList<gxString> &conf_lines)
 	LDMallow ldm_allow;
 	ldm_allow.Reset();
 	ldm_allow.feedtype = vals[1];
+	{
+	  unsigned int feed_mask = 0; // 10/25/2026: Feed types are checked as bit masks
+	  if(ldm_feed_expr_to_mask(ldm_allow.feedtype, feed_mask) != 0) {
+	    NT_print("ERROR - LDM conf ALLOW unknown feed type:", line.c_str());
+	    error_level = 2;
+	  }
+	}
 	ldm_allow.hostIdEre = vals[2]; fix_regex_quotes(ldm_allow.hostIdEre);
 	reti = regcomp(&regex, ldm_allow.hostIdEre.c_str(), REG_EXTENDED|REG_NOSUB);
 	if(reti) {
@@ -573,27 +587,8 @@ int read_ldm_config_file(const gxString &fname, gxList<gxString> &conf_lines, gx
 // Return non-zero value for fail, with error str returned in error_message
 int ldm_ip_to_hostname(const gxString &ip_str, gxString &hostname_str, gxString &error_message)
 {
-  struct addrinfo *result;
-  int gai_result;
-  char hostname[NI_MAXHOST];
-
-  memset(hostname, 0, NI_MAXHOST);
-  hostname_str.Clear();
-  error_message.Clear();
-
-  if((gai_result = getaddrinfo(ip_str.c_str(), 0, 0, &result)) != 0) {
-    error_message << clear << gai_strerror(gai_result);
-    return gai_result;
-  }
-  if((gai_result = getnameinfo(result->ai_addr, result->ai_addrlen, hostname, NI_MAXHOST, NULL, 0, 0)) != 0) {  
-    error_message << clear << gai_strerror(gai_result);
-    freeaddrinfo(result);
-    return gai_result;
-  }
-
-  if(*hostname != '\0') hostname_str << clear << hostname;
-  freeaddrinfo(result);
-  return 0;
+  // 10/25/2026: Use the forward-confirmed lookup shared with the other servers
+  return ip_to_hostname(ip_str, hostname_str, error_message);
 }
 
 int compare_ldm_regex(const gxString &regex_str, const gxString &str, int check_case)

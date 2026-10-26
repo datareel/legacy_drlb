@@ -17,8 +17,11 @@ install:
 install_root:
 	mkdir -pv /etc/drlb
 	chmod 755 /etc/drlb
+	getent group drlb >/dev/null || groupadd -r drlb
+	getent passwd drlb >/dev/null || useradd -r -g drlb -d /var/log/drlb -s /sbin/nologin -c "DataReel load balancer" drlb
 	mkdir -pv /var/log/drlb
-	chmod 755 /var/log/drlb
+	chown drlb:drlb /var/log/drlb
+	chmod 750 /var/log/drlb
 	cp -fv drlb_ldm_server /usr/sbin/drlb_ldm_server
 	chmod 755 /usr/sbin/drlb_ldm_server
 	if [ ! -f /etc/drlb/ldm_cluster.cfg ]; then cp -fv ../etc/ldm_cluster.cfg  /etc/drlb/ldm_cluster.cfg; fi
