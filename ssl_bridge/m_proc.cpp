@@ -45,6 +45,9 @@ using namespace std; // Use unqualified names for Standard C++ library
 #include "m_proc.h"
 #include "m_log.h"
 
+#include <pthread.h>
+#include <signal.h>
+
 void *ProcessThread::ThreadEntryRoutine(gxThread_t *thread)
 {
   while(servercfg->process_loop) { 
@@ -90,36 +93,41 @@ int StopThreads()
   if(servercfg->debug) LogProcMessage("Checking client request pool status");
   if(servercfg->client_request_pool) {
     if(!servercfg->client_request_pool->IsEmpty()) {
-      LogProcMessage("Closing all open client request threads");
-      thrPoolNode *ptr = servercfg->client_request_pool->GetHead();
-      while(ptr) {
-	gxThread_t *thread = ptr->GetThreadPtr();
-	if(thread->GetThreadState() == gxTHREAD_STATE_RUNNING) {
-	  num_threads++;
-	  t.CancelThread(thread);
-	  LogProcMessage("Shutting down client thread");
-	  if(thread->GetThreadState() == gxTHREAD_STATE_RUNNING) {
-	    LogProcMessage("Client thread was not canceled");
-	    error_level++;
-	  }
-	  else {
-	    LogProcMessage("Client thread was canceled");
-	  }
+      // 10/25/2026: Client threads are detached and cannot be canceled.
+      // The old code tried to cancel them and then freed their thread
+      // records while they were still running, which crashed the process
+      // on shutdown. With accept_clients cleared every relay loop exits
+      // within about one second, so wait for them to finish instead.
+      int wait_secs = servercfg->write_timeout_secs + 5;
+      while(1) {
+	num_threads = 0;
+	thrPoolNode *ptr = servercfg->client_request_pool->GetHead();
+	while(ptr) {
+	  if(ptr->GetThreadPtr()->GetThreadState() == gxTHREAD_STATE_RUNNING) num_threads++;
+	  ptr = ptr->GetNext();
 	}
-	ptr = ptr->GetNext();
-      } 
-      message << clear << "Found " << num_threads << " working client threads";
-      LogProcMessage(message.c_str());
-      sSleep(1); // Allow all threads to finish clean up handler calls
-      t.DestroyThreadPool(servercfg->client_request_pool, 0);
-      servercfg->client_request_pool = 0;
+	if(num_threads == 0 || wait_secs-- <= 0) break;
+	if(servercfg->debug) {
+	  message << clear << "Waiting for " << num_threads << " client threads to finish";
+	  LogProcMessage(message.c_str());
+	}
+	sSleep(1);
+      }
+      if(num_threads == 0) {
+	LogProcMessage("All client threads have finished");
+	t.DestroyThreadPool(servercfg->client_request_pool, 0);
+	servercfg->client_request_pool = 0;
+      }
+      else {
+	message << clear << num_threads << " client threads are still running and will end with the process";
+	LogProcMessage(message.c_str());
+      }
     }
     else {
       LogProcMessage("No open connections");
     }
   }
 
-  if(error_level != 0) return error_level;
 
   if(servercfg->debug) LogProcMessage("Checking LB server thread status");
   if(servercfg->server_thread) { 
@@ -225,103 +233,87 @@ void ExitProc(int return_code)
   exit(return_code);
 }
 
-void termination_handler(int signum)
-// UNIX signal hander used to handle process termination signals  
+// 10/25/2026: Signals are no longer handled in a signal handler. The
+// old handler locked mutexes, allocated memory and stopped threads from
+// signal context, which can deadlock. All threads now block these
+// signals and one thread waits for them with sigwait() and calls
+// termination_handler() as a normal function.
+static void drlb_signal_set(sigset_t *set)
 {
-  sigset_t mask_set;
-  sigset_t old_set;
+  sigemptyset(set);
+  sigaddset(set, SIGINT);
+  sigaddset(set, SIGQUIT);
+  sigaddset(set, SIGTERM);
+  sigaddset(set, SIGHUP);
+  sigaddset(set, SIGTSTP);
+  sigaddset(set, SIGUSR1);
+  sigaddset(set, SIGUSR2);
+}
+
+static void *signal_thread(void *)
+{
+  sigset_t set;
+  drlb_signal_set(&set);
+  while(1) {
+    int signum = 0;
+    if(sigwait(&set, &signum) != 0) continue;
+    termination_handler(signum);
+  }
+  return (void *)0;
+}
+
+int StartSignalThread()
+// Call before any other thread is created so every thread inherits the
+// blocked signal mask. Returns 0 if successful.
+{
+  sigset_t set;
+  drlb_signal_set(&set);
+  if(pthread_sigmask(SIG_BLOCK, &set, 0) != 0) return 1;
+  pthread_t tid;
+  pthread_attr_t attr;
+  pthread_attr_init(&attr);
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+  int rv = pthread_create(&tid, &attr, signal_thread, 0);
+  pthread_attr_destroy(&attr);
+  return rv;
+}
+
+void termination_handler(int signum)
+// Handles process termination and debug level signals. Called from
+// the signal thread, not from a signal handler.
+{
   gxString sbuf;
   int retries = 3;
 
-#ifndef __DEBUG__
-  if(signum == SIGSEGV) {
-    signal(SIGSEGV, termination_handler); // Reset the signal handler again
-    sigfillset(&mask_set); // Make any further signals while in handler
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
-    LogProcMessage("Process received segmentation violation");
-    StopProc();
-    sigprocmask(SIG_SETMASK, &old_set, NULL); // Restore the old signal mask2
-    ExitProc(1);
-    return;
-  }
-
-  if(signum == SIGBUS) {
-    signal(SIGBUS, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
-    LogProcMessage("Process received bus violation");
-    StopProc();
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
-    ExitProc(1);
-  }
-#endif 
-
   if(signum == SIGINT) {
-    signal(SIGINT, SIG_IGN); // Log first and ignore all others
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process interrupted with Ctrl-C");
     while(!StopProc() && --retries) sSleep(1);
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     if(!retries) ExitProc(1);
     ExitProc(0);
   }
   if(signum == SIGQUIT) {
-    signal(SIGQUIT, SIG_IGN);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process interrupted Ctrl-backslash");
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     return;
   }
   if(signum == SIGTERM) {
-    signal(SIGTERM, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process terminated by kill command");
     while(!StopProc() && --retries) sSleep(1);
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     if(!retries) ExitProc(1);
     ExitProc(0);
   }
   if(signum == SIGHUP) {
-    signal(SIGHUP, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process received hangup");
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     return;
   }
-  if(signum == SIGKILL) {
-    signal(SIGKILL, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
-    LogProcMessage("Process terminated by SIGKILL");
-    while(!StopProc() && --retries) sSleep(1);
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
-    if(!retries) ExitProc(1);
-    ExitProc(0);
-  }
   if(signum == SIGTSTP) {
-    signal(SIGTSTP, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process received suspend from Ctrl-Z");
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     return;
   }
   if(signum == SIGABRT) {
-    signal(SIGABRT, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process received SIGABRT");
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     return;
   }
   if(signum == SIGUSR1) {
-    signal(SIGUSR1, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process received SIGUSR1, lowering debug level");
     
     if(!servercfg->debug) LogProcMessage("Debug mode is disabled");
@@ -338,13 +330,9 @@ void termination_handler(int signum)
 	LogProcMessage(sbuf.c_str());
       }
     }
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     return;
   }
   if(signum == SIGUSR2) {
-    signal(SIGUSR2, termination_handler);
-    sigfillset(&mask_set);
-    sigprocmask(SIG_SETMASK, &mask_set, &old_set); 
     LogProcMessage("Process received SIGUSR2, raising debug level");
 
     if(servercfg->debug) {
@@ -369,7 +357,6 @@ void termination_handler(int signum)
 	LogProcMessage(sbuf.c_str());
       }
     }
-    sigprocmask(SIG_SETMASK, &old_set, NULL);
     return;
   }
 }

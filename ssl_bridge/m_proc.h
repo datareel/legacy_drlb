@@ -59,6 +59,7 @@ private:
 // Signal I/O process functions
 void signal_handler_IO(int status);  // Signal handler
 void termination_handler(int signum);
+int StartSignalThread();
 
 // Main process functions
 int StopProc();

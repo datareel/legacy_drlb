@@ -67,7 +67,7 @@ chmod 755 ${Build}/etc/drlb
 mkdir -p ${Build}/var/log/drlb
 chmod 755 ${Build}/var/log/drlb
 mkdir -p ${Build}/etc/drlb/ssl/private 
-chmod -R 700 ${Build}/etc/drlb/ssl/private
+chmod 750 ${Build}/etc/drlb/ssl/private
 mkdir -p ${Build}/etc/drlb/ssl/certs
 chmod -R 755 ${Build}/etc/drlb/ssl/certs
 mkdir -p ${Build}/usr/sbin

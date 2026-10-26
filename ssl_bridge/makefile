@@ -17,10 +17,15 @@ install:
 install_root:
 	mkdir -pv /etc/drlb
 	chmod 755 /etc/drlb
+	getent group drlb >/dev/null || groupadd -r drlb
+	getent passwd drlb >/dev/null || useradd -r -g drlb -d /var/log/drlb -s /sbin/nologin -c "DataReel load balancer" drlb
 	mkdir -pv /var/log/drlb
-	chmod 755 /var/log/drlb
+	chown drlb:drlb /var/log/drlb
+	chmod 750 /var/log/drlb
 	mkdir -pv /etc/drlb/ssl/private /etc/drlb/ssl/certs
-	chmod -R 755 /etc/drlb/ssl/private /etc/drlb/ssl/certs
+	chmod 755 /etc/drlb/ssl/certs
+	chown root:drlb /etc/drlb/ssl/private
+	chmod 750 /etc/drlb/ssl/private
 	cp -fv drlb_ssl_server /usr/sbin/drlb_ssl_server
 	chmod 755 /usr/sbin/drlb_ssl_server
 	if [ ! -f /etc/drlb/ssl_bridge.cfg ]; then cp -fv ../etc/ssl_bridge.cfg  /etc/drlb/ssl_bridge.cfg; fi

@@ -51,6 +51,7 @@ SSLconfig::SSLconfig()
   ssl_verify_backend_cert = 0;
   ssh_ca_list_file.Clear();
   ssl_use_dhparms = 0;
+  ssl_handshake_timeout_secs = 30;
   meth =  gxSSL_SSLv23;
   ssl_protocol = "SSLv23";
 }
@@ -77,7 +78,7 @@ int LoadSSLConfig()
   UString info_line, sbuf, parm_name;
   int error_level = 0;
   gxList<gxString> filelist;
-  char pbuf[255];
+  char pbuf[CFG_VALUE_SIZE];
   int filter_linefeeds = 0;
 
   while(!ifile.df_EOF()) {
@@ -254,6 +255,16 @@ int LoadSSLConfig()
 	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
 	    if(parm_name == "ssl_dhparms_file") {
 	      sslcfg->ssl_dhparms_file = CfgGetEqualToParm(info_line, pbuf);
+	    }
+	  }
+	  if(info_line.IFind("ssl_handshake_timeout_secs") != -1) {
+	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
+	    if(parm_name == "ssl_handshake_timeout_secs") {
+	      sslcfg->ssl_handshake_timeout_secs = CfgGetEqualToParm(info_line);
+	      if(sslcfg->ssl_handshake_timeout_secs <= 0) {
+		NT_print("ERROR - Bad ssl_handshake_timeout_secs value in [SSLCONFIG]");
+		error_level = 1;
+	      }
 	    }
 	  }
 	  if(info_line.IFind("ssl_protocol") != -1) {

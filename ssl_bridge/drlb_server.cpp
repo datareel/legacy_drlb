@@ -44,22 +44,14 @@ int main(int argc, char **argv)
   // ignore the broken pipe the kernel will kill this process.
   signal(SIGPIPE, SIG_IGN);
 
-  // Handle UNIX termination signals
-  signal(SIGINT, termination_handler);  // Ctrl-C or "kill INT pid"
-  signal(SIGQUIT, termination_handler); // Ctrl-backslash
-  signal(SIGTERM, termination_handler); // Kill command "kill pid"
-  signal(SIGHUP, termination_handler);  // Hangup if pstty closes with process running
-  signal(SIGKILL, termination_handler); // Used by kill -9
-  signal(SIGTSTP, termination_handler); // Ctrl-Z, resume with fg command
-  signal(SIGABRT, termination_handler); // Ctrl-backslash
-  signal(SIGUSR1, termination_handler); // kill -USR1
-  signal(SIGUSR2, termination_handler); // kill -USR2
-
-  // Allow sockets to close before any core dumps, if not DEBUG compile 
-#ifndef __DEBUG__
-  signal(SIGBUS, termination_handler);  // Misaligned memory access
-  signal(SIGSEGV, termination_handler); // Illegal memory access
-#endif
+  // Handle UNIX termination signals in a dedicated thread. SIGSEGV and
+  // SIGBUS are left to the default action so a crash leaves a core file
+  // and systemd can restart the service.
+  if(StartSignalThread() != 0) {
+    servercfg->verbose = 1;
+    NT_print("ERROR - Cannot start the signal handling thread");
+    return 1;
+  }
 
  // Process command ling arguments and files 
   int narg;
@@ -137,10 +129,13 @@ int main(int argc, char **argv)
 int run_server()
 {
   int error_level = 0;
-  LBServerThread server;
-  LogThread log;
-  StatsThread stats;
-  ProcessThread process;
+  // 10/25/2026: The thread objects must outlive run_server(). The threads
+  // keep pointers to them, and shutdown can cancel a thread after
+  // run_server() has returned, which used a destroyed object.
+  static LBServerThread server;
+  static LogThread log;
+  static StatsThread stats;
+  static ProcessThread process;
   int rv;
   int retries = 3;
 

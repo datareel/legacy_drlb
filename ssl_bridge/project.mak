@@ -71,4 +71,8 @@ m_dbase$(OBJ_EXT) \
 m_app$(OBJ_EXT) \
 m_config$(OBJ_EXT) \
 m_stats$(OBJ_EXT) \
-drlb_server$(OBJ_EXT)
+drlb_server$(OBJ_EXT) \
+m_relay$(OBJ_EXT)
+
+m_relay$(OBJ_EXT):	m_relay.cpp $(PROJECT_DEP)
+	$(CXX) $(COMPILE_ONLY) $(COMPILE_FLAGS) m_relay.cpp

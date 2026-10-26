@@ -52,6 +52,7 @@ struct SSLconfig {
   int ssl_verify_backend_cert;
   gxString ssl_backend_ca_list_file;
   int ssl_use_dhparms;
+  int ssl_handshake_timeout_secs; // Max seconds for a TLS handshake
   gxString ssl_protocol;
   gxSSLMethod meth;
   gxSSL openssl;

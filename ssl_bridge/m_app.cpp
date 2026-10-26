@@ -138,18 +138,12 @@ int check_config()
   }
   sbuf << clear << "Max queued connection requests " << servercfg->somaxconn;
   NT_print(sbuf.c_str());
-  sbuf << clear << servercfg->max_idle_count;
-  NT_print("Idle count for blocking sockets", sbuf.c_str()); 
-  sbuf << clear << servercfg->idle_wait_secs;
-  NT_print("Idle secs for blocking sockets", sbuf.c_str()); 
-  sbuf << clear << servercfg->idle_wait_usecs;
-  NT_print("Idle usecs for blocking sockets", sbuf.c_str()); 
-  if(servercfg->use_nonblock_sockets) {
-    NT_print("Using non-blocking sockets, idle settings ignored");
-  }
-  else {
-    NT_print("Using blocking sockets with idle settings");
-  }
+  sbuf << clear << servercfg->write_timeout_secs;
+  NT_print("Write timeout secs", sbuf.c_str()); 
+  sbuf << clear << servercfg->connect_timeout_secs;
+  NT_print("Backend connect timeout secs", sbuf.c_str()); 
+  sbuf << clear << servercfg->max_cache_size;
+  NT_print("Max bytes read before each write", sbuf.c_str()); 
   sbuf << clear << servercfg->log_queue_size;
   NT_print("Max number of log or console messages to queue", sbuf.c_str()); 
   sbuf << clear << servercfg->log_queue_debug_size;

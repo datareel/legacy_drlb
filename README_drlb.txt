@@ -20,6 +20,7 @@ Contents:
 * Testing DRLB configurations files
 * Running DRLB as a service
 * Firewall Settings
+* Service Security
 * Configuration Changes
 * Setting the listening port
 * Round robin configuration
@@ -304,6 +305,24 @@ of the open port:
 
 On each back end server, open the back end port to the DRLB server
 address only.
+
+Service Security
+----------------
+The DRLB services run as the drlb system user, created when the RPM is
+installed. systemd gives the server only the CAP_NET_BIND_SERVICE
+capability, so it can listen on ports below 1024, and limits it to
+writing in /var/log/drlb. Log and stats files must be in /var/log/drlb.
+
+Files the server reads, such as configuration files, must be readable
+by the drlb user. Keep private keys readable by the drlb group only:
+
+# chgrp drlb /etc/drlb/ssl/private/server.key
+# chmod 640 /etc/drlb/ssl/private/server.key
+
+Rules regular expressions are not anchored. A rule for 192.168.1.1
+also matches 192.168.1.10, so use ^192\.168\.1\.1$ to match one
+address. With resolve_assigned_hostnames = 1 a client host name is
+used only when it resolves back to the client address.
 
 Configuration Changes
 ---------------------
@@ -893,39 +912,37 @@ configuration:
 ...
 somaxconn = 1024
 
-Depending on your application you may need to adjust the DRLB socket
-options to prevent CPU usage spikes. To adjust the socket options edit
-the following options in your configuration file:
+DRLB waits for data on both sides of each connection with poll(), so
+idle connections do not use CPU time. The connection and data
+settings are:
 
 [LBSERVER]
 ...
-# Idle time for blocking sockets
-max_idle_count = 60000
-idle_wait_secs = 0
-idle_wait_usecs = 500
-
-# Use non-blocking sockets
-use_nonblock_sockets = 0
-
-The idle time setting adjustments are most effective for a large
-number of persistent connections. For connections that stay open for
-long periods without transferring data, increasing the values will
-reduce CPU usage. Decreasing the idle times or using non-blocking
-sockets is most affective for connections that rapidly open and close.
-
-For applications that rely on timing for socket reads you can set your
-DRLB configuration to use blocking reads with timeout values:
-
-[LBSERVER]
-...
-use_buffer_cache = 0
+# Close connections with no data in either direction for timeout_secs
 use_timeout = 1
 timeout_secs = 300
 timeout_usecs = 0
 
-This will disable the buffer cache and set the read timeout value to
-300 seconds. If the socket connection does not receive data within 300
-seconds the connection will close.
+# Seconds to wait for a slow peer to accept data, and to connect to a node
+write_timeout_secs = 60
+connect_timeout_secs = 5
+
+# Max bytes read from one side before they are written to the other side
+max_cache_size = 1048576
+
+With use_timeout = 1 a connection that sends no data in either
+direction for timeout_secs is closed. Set a longer timeout for
+services with long quiet periods, or use_timeout = 0 to keep idle
+connections open. A peer that does not accept data for
+write_timeout_secs is disconnected.
+
+With use_buffer_cache = 1 DRLB reads all the data that is ready on one
+side, up to max_cache_size bytes, and then writes it to the other
+side. With use_buffer_cache = 0 each read is written right away.
+
+The max_idle_count, idle_wait_secs, idle_wait_usecs and
+use_nonblock_sockets settings from DRLB 1.59 and earlier are no longer
+used and are ignored.
 
 DRLB process monitoring
 -----------------------
@@ -1167,6 +1184,13 @@ enable_http_forwarding = 1
 http_request_strings = GET,HEAD,POST
 http_hdr_str = HTTP/
 http_forward_for_str = X-Forwarded-For
+
+DRLB adds one X-Forwarded-For header with the client address to every
+request on a connection, including keep alive requests. Any
+X-Forwarded-For header sent by the client is removed first, so back end
+servers can trust the header. Requests that do not start with one of
+the http_request_strings, and WebSocket or CONNECT tunnels, are passed
+through unchanged.
 
 NOTE: To see forwarded IP addresses in your Apache log entries you
 must add the following to your httpd conf:
