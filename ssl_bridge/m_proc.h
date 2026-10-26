@@ -63,6 +63,7 @@ int StartSignalThread();
 
 // Main process functions
 int StopProc();
+void RequestStop();
 void ExitProc(int return_code);
 int StopThreads();
 

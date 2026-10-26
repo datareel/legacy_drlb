@@ -825,25 +825,26 @@ read from TCP socket connections. In certain network environments it
 may be necessary to disable cache buffering or change the default
 buffer size. Lowing the buffer size will result in more reads per
 connection. Increasing the buffer size will decrease the number of
-reads per connection. To set the cache or buffer size settings for all
+reads per connection. The default buffer size is 65536 bytes (it was
+1500 in DRLB 1.59 and earlier). To set the cache or buffer size settings for all
 nodes, edit your configuration file and modify the following
 parameters in the [LBSERVER] section:
 
 [LBSERVER]
 ...
 use_buffer_cache = 1
-buffer_size = 1500
+buffer_size = 65536
 
 To set the buffer size for individual nodes:
 
 [LBNODE]
 node_name = lbnode1
-buffer_size = 1500
+buffer_size = 65536
 ...
 
 [LBNODE]
 node_name = lbnode2
-buffer_size = 1500
+buffer_size = 16384
 ...
 
 [LBNODE]

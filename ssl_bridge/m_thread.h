@@ -87,6 +87,7 @@ public:
 
 public:
   void HandleClientRequest(ClientSocket_t *s);
+  int connect_backend(ClientSocket_t *s, LBnode *n, const char *how);
   LBnode *round_robin(ClientSocket_t *s, gxList<LBnode *> &node_list);
   LBnode *round_robin(ClientSocket_t *s);
   LBnode *assigned(ClientSocket_t *s);

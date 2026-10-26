@@ -66,6 +66,33 @@ struct RelaySide {
 #endif
 };
 
+// Growable byte buffer used by the relay and its filters. It grows in
+// powers of two, so appending many small reads stays linear.
+class RelayBuffer
+{
+public:
+  RelayBuffer() { buf = 0; len = cap = 0; }
+  ~RelayBuffer() { delete[] buf; }
+
+public:
+  void Cat(const void *p, unsigned bytes);
+  void Cat(char c) { Cat(&c, 1); }
+  void Clear() { len = 0; }
+  void DeleteFront(unsigned bytes); // Remove bytes from the start
+  unsigned length() const { return len; }
+  char *m_buf() { return buf; }
+  const char *m_buf() const { return buf; }
+
+private:
+  RelayBuffer(const RelayBuffer &) { }
+  void operator=(const RelayBuffer &) { }
+
+private:
+  char *buf;
+  unsigned len;
+  unsigned cap;
+};
+
 // Filters see every block of data read from either side, in order.
 // Filter() appends the bytes to forward to out, which may differ from
 // the input (headers added or removed) or hold bytes back until more
@@ -78,7 +105,7 @@ public:
   virtual ~RelayFilter() { }
 
 public:
-  virtual int Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, MemoryBuffer &out) = 0;
+  virtual int Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, RelayBuffer &out) = 0;
 };
 
 // HTTP X-Forwarded-For filter. Adds one forwarding header with the
@@ -92,17 +119,17 @@ public:
   ~HttpForwardFilter() { }
 
 public:
-  int Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, MemoryBuffer &out);
+  int Filter(ClientSocket_t *s, int from_frontend, const char *buf, int bytes, RelayBuffer &out);
 
 private:
-  int process_header(ClientSocket_t *s, MemoryBuffer &out);
-  int process_body(const char *buf, int bytes, int &used, MemoryBuffer &out);
+  int process_header(ClientSocket_t *s, RelayBuffer &out);
+  int process_body(const char *buf, int bytes, int &used, RelayBuffer &out);
 
 private:
   enum { HTTP_HEADER, HTTP_BODY_LENGTH, HTTP_CHUNK_SIZE, HTTP_CHUNK_DATA,
 	 HTTP_CHUNK_DATA_END, HTTP_TRAILER, HTTP_PASSTHRU };
   int state;
-  MemoryBuffer header;          // Request header being collected
+  RelayBuffer header;           // Request header being collected
   unsigned long long remaining; // Body or chunk bytes left to pass
   gxString line;                // Chunk size or trailer line being collected
 };
