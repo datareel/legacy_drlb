@@ -1,5 +1,9 @@
-README file for DRLB LDM server 1.64 beta
-Last Modified: 10/26/2026
+README file for DRLB LDM server 1.65
+Last Modified: 10/31/2026
+
+NOTE: This is the final release of the legacy DRLB LDM load balancer
+(drlb_ldm_server) package. drlb_server 2.0 does not replace the LDM load
+balancer. Its source and releases stay in the legacy_drlb repository.
 
 Contents:
 --------

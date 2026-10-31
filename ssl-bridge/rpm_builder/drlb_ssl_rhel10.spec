@@ -1,7 +1,7 @@
 BuildArch: x86_64
 Name: drlb_ssl_server
-Version: 1.60
-Release: 0.1.beta.el10
+Version: 1.61
+Release: 1.el10
 Summary: Datareel SSL Load Balancer RPM
 Group: System Environment/Daemons
 License: GPL
@@ -69,6 +69,8 @@ if [ $1 -ge 1 ] ; then
 fi
 
 %changelog
+* Sat Oct 31 2026 Datareel <datareel.com>
+- Version 1.61, the final release of this legacy package
 * Mon Oct 26 2026 Datareel <datareel.com>
 - Version 1.60 beta
 - Security fixes from the October 2026 review, new poll() based relay

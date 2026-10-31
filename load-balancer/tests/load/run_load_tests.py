@@ -428,7 +428,7 @@ def exp_idle(quick):
     levels = [0, 1000, 2500, 5000, 10000] if not quick else [0, 1000, 3000]
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (min(hard, 65536), hard))
-    binaries = [('DRLB 1.60', DRLB)]
+    binaries = [('DRLB 1.61', DRLB)]
     # Set DRLB_OLD to a DRLB 1.59 drlb_server binary to compare with it
     if os.environ.get('DRLB_OLD'):
         binaries.append(('DRLB 1.59', os.environ['DRLB_OLD']))

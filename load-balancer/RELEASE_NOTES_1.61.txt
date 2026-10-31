@@ -1,3 +1,17 @@
+DRLB TCP load balancer 1.61 release notes
+Released 10/31/2026
+
+This is the final release of the legacy DRLB TCP load balancer
+(drlb_server) package. drlb_server 2.0 (the tcp_load_balancer
+repository) replaces this package.
+
+Changes since 1.60 beta
+-----------------------
+* Version 1.61, a final release instead of a beta. No code changes
+  other than the version number.
+
+======================================================================
+
 DRLB 1.60 beta release notes
 DataReel Load Balancer, released 10/26/2026 as a beta
 

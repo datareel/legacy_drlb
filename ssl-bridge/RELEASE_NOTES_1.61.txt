@@ -1,3 +1,18 @@
+DRLB SSL bridge 1.61 release notes
+Released 10/31/2026
+
+This is the final release of the legacy DRLB SSL bridge
+(drlb_ssl_server) package. drlb_server 2.0 (the tcp_load_balancer
+repository) replaces this package: a drlb_server config with an
+[SSLCONFIG] section runs as the SSL bridge.
+
+Changes since 1.60 beta
+-----------------------
+* Version 1.61, a final release instead of a beta. No code changes
+  other than the version number.
+
+======================================================================
+
 DRLB SSL Bridge 1.60 beta release notes
 Released 10/26/2026 as a beta
 

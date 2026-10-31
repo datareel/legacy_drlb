@@ -1,3 +1,18 @@
+DRLB LDM load balancer 1.65 release notes
+Released 10/31/2026
+
+This is the final release of the legacy DRLB LDM load balancer
+(drlb_ldm_server) package. drlb_server 2.0 does not replace the LDM
+load balancer. Its source and releases stay in the legacy_drlb
+repository.
+
+Changes since 1.64 beta
+-----------------------
+* Version 1.65, a final release instead of a beta. No code changes
+  other than the version number.
+
+======================================================================
+
 DRLB LDM 1.64 beta release notes
 DRLB LDM load balancer, released 10/26/2026 as a beta
 
