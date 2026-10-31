@@ -1,0 +1,11 @@
+# /etc/sysconfig/drlb_ldm_server
+# Settings for the drlb_ldm_server systemd service
+
+# ARGS to pass to the drlb_ldm_server program
+##ARGS=""
+
+# LB config file to use, if not default config
+##CFGFILE="/etc/drlb/ldm_cluster.cfg"
+
+# Set to yes to skip the RHEL 8 NetworkManager and firewalld check
+##DRLB_SKIP_PLATFORM_CHECK=no
