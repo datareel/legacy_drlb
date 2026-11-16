@@ -431,6 +431,9 @@ void SetupBackendSSL(ClientSocket_t *s, LBnode *n)
     s->openssl_client->NoVerifyCert();
   }
   SetSocketTimeouts(s->client.GetSocket(), sslcfg->ssl_handshake_timeout_secs, sslcfg->ssl_handshake_timeout_secs);
+  // 11/15/2026: DataReel 6.4 sets its own handshake timeout (10 s by
+  // default) on the socket during the handshake; use the configured one
+  s->openssl_client->SetHandshakeTimeout(sslcfg->ssl_handshake_timeout_secs);
 }
 
 int get_fd_error(int &error_number, gxString &sbuf)
@@ -450,6 +453,9 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
   // 10/25/2026: Bound the TLS handshake so a client that never finishes
   // it cannot hold this thread
   SetSocketTimeouts(s->client_socket, sslcfg->ssl_handshake_timeout_secs, sslcfg->ssl_handshake_timeout_secs);
+  // 11/15/2026: DataReel 6.4 sets its own handshake timeout (10 s by
+  // default) on the socket during the handshake; use the configured one
+  s->openssl->SetHandshakeTimeout(sslcfg->ssl_handshake_timeout_secs);
   if(s->openssl->OpenSSLSocket(s->client_socket) != gxSSL_NO_ERROR) {
     if(servercfg->log_level >= 3) {
       sbuf << clear << "[" << seq_num << "]: Error opening frontend SSL socket";
