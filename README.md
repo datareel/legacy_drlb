@@ -28,32 +28,34 @@ in front, for example `load-balancer-1.60-beta`.
 Each folder builds on its own, as before. See the README.txt in each
 folder (RPM builds are in each folder's `rpm_builder/`).
 
-## TODO: DataReel 6.3 patch releases
+## DataReel 6.4 update (11/15/2026, not released yet)
 
-When DataReel 6.3 is released, patch all three packages to it:
+All three packages now bundle the DataReel 6.4 beta 1 files (datareel tag
+`6.4-beta1`, the 6.3.1 library) in `include/` and `src/`, in place of 6.2:
+- Only the files each package already bundled are updated, plus the ones
+  the 6.4 files now need: `gxdfp64.cpp`, `gxdfp64.h`, `gxdtyp64.h`,
+  `gxint64.h` and `gxuint64.h`.
+- The local OpenSSL changes are kept. `include/gxssl.h` (TLS 1.3 value,
+  comments) was merged with 6.4. In ssl-bridge, `src/gxssl.cpp` was merged
+  by hand: the TLS 1.2 minimum, `gxSSL_TLSv1_3`, verification of the host
+  name or IP address in the handshake and SNI for DNS names only are kept;
+  6.4 adds the handshake timeout, SIGPIPE handling and owner-only key
+  files, and its subjectAltName/IP check replaces the local one.
+- ssl-bridge: DataReel 6.4 applies its own handshake timeout (10 s by
+  default), so `ssl_bridge/m_thread.cpp` passes `ssl_handshake_timeout_secs`
+  to `gxSSL::SetHandshakeTimeout()` as well.
 
-1. In each package, update the bundled DataReel files in `include/` and
-   `src/` from the DataReel 6.3 release. Only the files the package
-   already bundles are needed.
-2. Keep the local OpenSSL 3.5 changes. These bundled files differ from
-   DataReel 6.2 and must be merged by hand, not overwritten:
-   - `include/gxssl.h` in all three packages
-   - `src/gxssl.cpp` in ssl-bridge
-   Check whether 6.3 already has the same changes before merging.
-3. Rebuild each package, and run its tests: `tests/drlb_tests.py`,
-   `tests/ssl_bridge_tests.py` and `tests/ldm_tests.py`.
-4. Release each as a patch version: load-balancer 1.62, ssl-bridge 1.62
-   and LDM-load-balancer 1.66. Update `version.txt`, `VersionString` in
-   `m_help.cpp`, the man pages, the RPM specs (Version, Release 1 and the
-   changelog), the README and the release notes, which must say "Built
-   with the DataReel 6.3 library".
-5. Tag each one (`load-balancer-1.62`, `ssl-bridge-1.62`,
-   `LDM-load-balancer-1.66`) and push to aws.
+Tests (RHEL 10.2, gcc 14.4.1), the same on the 6.2 and the 6.4 builds:
+`tests/ldm_tests.py` 21/21, `tests/drlb_tests.py` 18/18 and
+`tests/ssl_bridge_tests.py` 15/15; the same suites with ASan + UBSan builds
+have no sanitizer reports. A 10 minute traffic soak of drlb_server (4
+clients, 200 KB transfers, a back end stopped for 10 s every minute):
+about 393,000 requests, with one failed request per back end stop (the
+request in flight on the stopped back end), the same as the 6.2 build;
+memory flat (8 to 9 MB), clean exit. valgrind over 50,000 requests: 0
+errors.
 
-Bundled DataReel version today: all three packages bundle **DataReel
-6.2**. Their release notes say so, and every bundled file matches the
-datareel repository's `6.2` tag except the `gxssl` files above.
-
-DataReel 6.3 status on 11/01/2026: it is in progress on the
-`6.3-oodb-backport` branch of the datareel repository (based on 6.2,
-with `RELEASE_NOTES_6.3.txt`). There is no `6.3` tag yet.
+Still to do for a release (dougg's decision): version numbers
+(load-balancer 1.62, ssl-bridge 1.62, LDM-load-balancer 1.66), `version.txt`,
+`VersionString` in `m_help.cpp`, the man pages, the RPM specs, the release
+notes ("Built with the DataReel 6.4 library") and the tags.

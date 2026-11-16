@@ -1,0 +1,145 @@
+// ------------------------------- //
+// -------- Start of File -------- //
+// ------------------------------- //
+// ----------------------------------------------------------- //
+// C++ Header File Name: gxdfp64.h
+// Compiler Used: MSVC, GCC
+// Produced By: DataReel Software Development Team
+// File Creation Date: 02/04/1997 
+// Date Last Modified: 10/26/2026
+// Copyright (c) 2001-2026 DataReel Software Development
+// ----------------------------------------------------------- // 
+// ---------- Include File Description and Details  ---------- // 
+// ----------------------------------------------------------- // 
+/*
+This library is free software; you can redistribute it and/or
+modify it under the terms of the GNU Lesser General Public
+License as published by the Free Software Foundation; either
+version 2.1 of the License, or (at your option) any later version.
+ 
+This library is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public
+License along with this library; if not, write to the Free Software
+Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  
+USA
+
+The gxDatabase 64-bit file helpers are a collection of classes 
+and standalone functions used to support large files on multiple
+target platforms. NOTE: None of the data structures and 
+functions defined are intended to be used directly. They are
+used by the gxDatabase class to call the correct native 
+64-bit file API function for each supported platform. 
+
+DataReel 6.3 supports large files on Windows 11 and Windows Server
+2022 and later (NTFS, where the file size is limited by the volume)
+and on Red Hat Enterprise Linux 8, 9 and 10 (64-bit file offsets).
+
+10/31/2026 (6.3, from DataReel 7.2): The file type is also used by the
+32-bit database engine on UNIX and with MSVC. Reads and writes are
+positional (pread()/pwrite(), or ReadFile()/WriteFile() with an
+offset), so a seek costs no system call.
+
+Changes:
+==============================================================
+03/18/2002: Changed the return types for the gxdFPTR64Read() and
+gxdFPTR64Write() functions to return the number of bytes read and
+moved rather than the returning 0/1 to indicate a pass/fail 
+condition. This change was made to support additional classes
+throughout the library.
+==============================================================
+*/
+// ----------------------------------------------------------- //  
+#ifndef __GX_DATABASE_FILE_POINTER_64_HPP__
+#define __GX_DATABASE_FILE_POINTER_64_HPP__
+
+#include "gxdlcode.h"
+
+
+// Non-platform specific include files
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <stdio.h>
+#include "gxdtypes.h"
+#include "gxheader.h"
+
+// Platform specific include files
+#if defined (__WIN32__)
+#include <io.h>
+#include <windows.h>
+#elif defined (__UNIX__)
+// NOTE: Place specific UNIX variants above this directive.
+#include <unistd.h> // UNIX standard function definitions
+#else
+#error You must define a target platform: __WIN32__ or __UNIX__
+#endif
+
+
+
+// Platform specific file pointer type
+struct GXDLCODE_API gxdFPTR64 {
+#if defined (__WIN32__) && defined (__MSVC__)
+  // WIN32 file pointer type for MSVC
+  // 10/31/2026: Positional I/O. Reads and writes pass the offset kept
+  // in "pos" to ReadFile()/WriteFile() in an OVERLAPPED structure, so a
+  // seek costs no system call.
+  HANDLE fptr;
+  __LLWORD__ pos;
+#elif defined (__UNIX__) && defined (__LINUX__)
+  // 10/31/2026: Positional I/O. Reads and writes use pread()/pwrite() at
+  // the position kept in "pos", so a seek costs no system call and there
+  // is no stdio buffer to discard. "fptr" is a stdio stream on the same
+  // descriptor, kept so fileno(stream->fptr) still works; the library
+  // never reads or writes through it.
+  FILE *fptr;
+  int fd;
+  __LLWORD__ pos;
+#else
+#error You must define a target platform and/or compiler
+#endif
+};
+
+// NOTE: Any underlying 64-bit file system used must provide the basic
+// functionality defined here.
+GXDLCODE_API gxdFPTR64 *gxdFPTR64Create(const char *fname);
+GXDLCODE_API gxdFPTR64 *gxdFPTR64Open(const char *fname, 
+				      gxDatabaseAccessMode mode);
+GXDLCODE_API int gxdFPTR64Close(gxdFPTR64 *stream);
+GXDLCODE_API int gxdFPTR64Flush(gxdFPTR64 *stream);
+GXDLCODE_API __ULWORD__ gxdFPTR64Read(gxdFPTR64 *stream, void *buf, 
+				      __ULWORD__ bytes);
+GXDLCODE_API __ULWORD__ gxdFPTR64Write(gxdFPTR64 *stream, const void *buf, 
+				       __ULWORD__ bytes);
+GXDLCODE_API __LLWORD__ gxdFPTR64Seek(gxdFPTR64 *stream, __LLWORD__,
+				      gxDatabaseSeekMode mode);
+GXDLCODE_API __LLWORD__ gxdFPTR64Tell(gxdFPTR64 *stream);
+GXDLCODE_API int gxdFPTR64Sync(gxdFPTR64 *stream, int full);
+GXDLCODE_API __ULWORD__ gxdFPTR64ReadAt(gxdFPTR64 *stream, void *buf, 
+					__ULWORD__ bytes, __LLWORD__ offset);
+GXDLCODE_API __ULWORD__ gxdFPTR64WriteAt(gxdFPTR64 *stream, const void *buf,
+					 __ULWORD__ bytes, __LLWORD__ offset);
+GXDLCODE_API int gxdFPTR64Truncate(gxdFPTR64 *stream, __LLWORD__ size);
+GXDLCODE_API int gxdFPTR64Allocate(gxdFPTR64 *stream, __LLWORD__ size);
+GXDLCODE_API int gxdFPTR64Lock(gxdFPTR64 *stream, int exclusive);
+GXDLCODE_API void *gxdFPTR64Map(gxdFPTR64 *stream, __LLWORD__ len,
+				void **map_handle);
+GXDLCODE_API void gxdFPTR64Unmap(void *addr, __LLWORD__ len, void *map_handle);
+GXDLCODE_API int gxdFPTR64Unlock(gxdFPTR64 *stream);
+GXDLCODE_API gxdFPTR64 *gxdFPTR64CreatePrivate(const char *fname);
+GXDLCODE_API int gxdFPTR64MakePrivate(const char *fname);
+GXDLCODE_API int gxdFPTR64Exists(const char *fname);
+GXDLCODE_API __LLWORD__ gxdFPTR64FileSize(const char *fname);
+
+
+
+#endif // __GX_DATABASE_FILE_POINTER_64_HPP__
+// ----------------------------------------------------------- // 
+// ------------------------------- //
+// --------- End of File --------- //
+// ------------------------------- //
