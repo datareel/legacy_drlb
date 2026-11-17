@@ -6,7 +6,7 @@
 // C++ Compiler Used: MSVC, GCC
 // Produced By: DataReel Software Development Team
 // File Creation Date: 10/17/2001
-// Date Last Modified: 10/31/2026
+// Date Last Modified: 11/16/2026
 // Copyright (c) 2001-2026 DataReel Software Development
 // ----------------------------------------------------------- // 
 // ------------- Program Description and Details ------------- // 
@@ -56,6 +56,16 @@ gxStream TLS mode: SetClientCAList(), VerifyClientCert() and
 GetPeerCertIdentity() (SHA-256 fingerprint and subject CN), and
 SetDefaultCAPaths() for clients that check a server against the system
 certificate store.
+
+11/16/2026: TLS settings from the DataReel 7.x and ssl-bridge versions.
+With OpenSSL 1.1 and later the TLS and DTLS methods are used with a
+minimum protocol version: gxSSL_SSLv23 and gxSSL_TLS negotiate TLS 1.2
+or TLS 1.3, gxSSL_TLSv1_2 is TLS 1.2 only and the new gxSSL_TLSv1_3 is
+TLS 1.3 only. SSLv2, SSLv3, TLS 1.0, TLS 1.1 and DTLS 1.0 are refused
+with gxSSL_PROTOCOL_ERROR. The server name (SNI) is not sent for IP
+addresses. With RequireVerifyCert() the handshake checks the chain and
+the host name, and the system store is trusted when no CA list is set.
+The handshake timeout keeps a shorter socket timeout set by the caller.
 */
 // ----------------------------------------------------------- // 
 #include "gxdlcode.h"
@@ -366,6 +376,9 @@ static void gxssl_set_handshake_timeout(gxsSocket_t s, int seconds,
 					gxsslSockTimeouts &old)
 // 10/31/2026: Save the socket's send and receive timeouts and set both
 // to seconds for a TLS handshake. Does nothing if seconds <= 0.
+// 11/16/2026: A shorter timeout already set on the socket is kept, so
+// the handshake limit never lengthens a limit the caller chose (the
+// ssl-bridge's handshake timeout was lengthened to 60 seconds).
 {
   old.saved = 0;
   if(seconds <= 0 || s == (gxsSocket_t)-1) return;
@@ -375,8 +388,11 @@ static void gxssl_set_handshake_timeout(gxsSocket_t s, int seconds,
   len = (int)sizeof(DWORD);
   if(getsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (char *)&old.snd, &len) != 0) return;
   DWORD ms = (DWORD)seconds * 1000;
-  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&ms, sizeof(ms));
-  setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&ms, sizeof(ms));
+  // 0 means no timeout
+  DWORD rcv_ms = (old.rcv != 0 && old.rcv < ms) ? old.rcv : ms;
+  DWORD snd_ms = (old.snd != 0 && old.snd < ms) ? old.snd : ms;
+  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&rcv_ms, sizeof(rcv_ms));
+  setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, (const char *)&snd_ms, sizeof(snd_ms));
 #else
   socklen_t len = (socklen_t)sizeof(old.rcv);
   if(getsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &old.rcv, &len) != 0) return;
@@ -385,8 +401,20 @@ static void gxssl_set_handshake_timeout(gxsSocket_t s, int seconds,
   struct timeval tv;
   tv.tv_sec = seconds;
   tv.tv_usec = 0;
-  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-  setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+  // A zero timeval means no timeout
+  struct timeval rcv = tv, snd = tv;
+  if((old.rcv.tv_sec || old.rcv.tv_usec) && 
+     ((old.rcv.tv_sec < tv.tv_sec) || 
+      ((old.rcv.tv_sec == tv.tv_sec) && (old.rcv.tv_usec < tv.tv_usec)))) {
+    rcv = old.rcv;
+  }
+  if((old.snd.tv_sec || old.snd.tv_usec) && 
+     ((old.snd.tv_sec < tv.tv_sec) || 
+      ((old.snd.tv_sec == tv.tv_sec) && (old.snd.tv_usec < tv.tv_usec)))) {
+    snd = old.snd;
+  }
+  setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &rcv, sizeof(rcv));
+  setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, &snd, sizeof(snd));
 #endif
   old.saved = 1;
 }
@@ -814,6 +842,44 @@ int gxSSL::RecvSSLSocket(void *buf, int bytes, int seconds, int useconds)
 }
 
 // 07/31/2021: Include support for openssl 1.0.1
+int gxSSL::RecvSomeSSLSocket(void *buf, int bytes, int seconds, int useconds)
+// 11/16/2026: Returns the decrypted bytes available, up to bytes,
+// waiting up to the timeout for the first one. Used by line based
+// protocols (gxsIMAPClient) that cannot ask for an exact byte count.
+// Returns the number of bytes read, 0 if the connection has closed,
+// or -1 if an error occurs or the timeout is exceeded.
+{
+  bytes_read = 0;
+  if(is_ssl_null()) return -1;
+  if(bytes <= 0) return 0;
+  gxSocket gxsocket_object;
+  int open_socket = (int)gxssl_get_fd(ssl);
+  for(;;) {
+    // OpenSSL may already hold decrypted bytes the socket does not show
+    if((SSL_pending(ssl) <= 0) &&
+       (!gxsocket_object.ReadSelect(open_socket, seconds, useconds))) {
+      ssl_error = gxSSL_REQUEST_TIMEOUT;
+      return -1;
+    }
+    int rv = SSL_read(ssl, buf, bytes);
+    if(rv > 0) {
+      bytes_read = rv;
+      ssl_error = gxSSL_NO_ERROR;
+      return rv;
+    }
+    int err = check_ssl_error(rv);
+    if(err == SSL_ERROR_ZERO_RETURN) return 0;
+    // A record that held no application data, such as a TLS 1.3
+    // session ticket: wait for more
+    if(err == SSL_ERROR_WANT_READ) continue;
+    if(err == SSL_ERROR_SYSCALL && rv == 0) {
+      ssl_error = gxSSL_DISCONNECTED_ERROR;
+      return 0;
+    }
+    return -1;
+  }
+}
+
 int gxSSL::RecvSSLSocket(void *buf, int bytes, int useTimeout, int seconds,
 			 int useconds)
 // Receive a block of data from a specified socket and do not return
