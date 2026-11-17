@@ -33,6 +33,9 @@ Multi-threaded framework Datareel load balancer.
 */
 // ----------------------------------------------------------- // 
 #include "gxdlcode.h"
+#if defined (__UNIX__)
+#include <fcntl.h> // 11/17/2026: FD_CLOEXEC on accepted sockets
+#endif
 
 #include <regex.h>
 #include <string.h>
@@ -151,6 +154,10 @@ void *LBServerThread::ThreadEntryRoutine(gxThread_t *thread)
     memset(&remote_sin, 0, sizeof(gxsSocketAddress));
     gxsSocketLength_t addr_size = (gxsSocketLength_t)sizeof(remote_sin); 
     remote_socket = accept(gxsocket, (struct sockaddr *)&remote_sin, &addr_size);
+#if defined (__UNIX__) && defined (FD_CLOEXEC)
+    // 11/17/2026: Close on exec, the same as DataReel 6.4.1 sockets
+    if(remote_socket >= 0) fcntl(remote_socket, F_SETFD, FD_CLOEXEC);
+#endif
     if(remote_socket < 0) {
       // 10/25/2026: Only a broken listening socket ends the server. Running
       // out of file descriptors or memory, or a client resetting before
