@@ -1,3 +1,27 @@
+DRLB TCP load balancer 1.62 release notes
+Prepared 11/17/2026 (not tagged or released yet)
+
+1.62 is a patch release of the legacy DRLB TCP load balancer (drlb_server) package.
+
+Changes since 1.61
+-----------------------
+* Built with the DataReel 6.4.1 library (DataReel 6.4 plus the 6.4.1
+  fixes). Only the DataReel files the server uses are included; each
+  is the unmodified DataReel 6.4.1 file.
+* The local OpenSSL changes once kept in gxssl.h are now
+  part of DataReel 6.4 itself: TLS 1.2 minimum, gxSSL_TLSv1_3, no SNI
+  for IP addresses, host name checks in the handshake, the system
+  trust store, and the handshake timeout keeping a shorter caller
+  timeout. SSLv3, TLS 1.0 and TLS 1.1 are refused.
+* Sockets are close-on-exec (FD_CLOEXEC): the DataReel 6.4.1 sockets
+  and the client sockets the server accepts itself.
+* DataReel 6.4.1 thread fixes: a thread is RUNNING as soon as it is
+  created, timed waits use the monotonic clock (a system time change
+  no longer shortens or stretches them), and the sleep calls no longer
+  leak a locked mutex on every call.
+
+======================================================================
+
 DRLB TCP load balancer 1.61 release notes
 Released 10/31/2026
 

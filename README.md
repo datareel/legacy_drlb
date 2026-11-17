@@ -4,11 +4,11 @@ This repository holds the last releases of the three DRLB packages that
 were built on the DataReel library, each in its own folder with its full
 git history:
 
-| Folder | Program | Final release | Tag |
+| Folder | Program | Latest release | Tag |
 |---|---|---|---|
-| `load-balancer/` | `drlb_server`, TCP load balancer | 1.61 | `load-balancer-1.61` |
-| `ssl-bridge/` | `drlb_ssl_server`, SSL bridge | 1.61 | `ssl-bridge-1.61` |
-| `LDM-load-balancer/` | `drlb_ldm_server`, LDM load balancer | 1.65 | `LDM-load-balancer-1.65` |
+| `load-balancer/` | `drlb_server`, TCP load balancer | 1.62 (not tagged yet; 1.61 tagged) | `load-balancer-1.61` |
+| `ssl-bridge/` | `drlb_ssl_server`, SSL bridge | 1.62 (not tagged yet; 1.61 tagged) | `ssl-bridge-1.61` |
+| `LDM-load-balancer/` | `drlb_ldm_server`, LDM load balancer | 1.66 (not tagged yet; 1.65 tagged) | `LDM-load-balancer-1.65` |
 
 Earlier tags from the original repositories are kept with the folder name
 in front, for example `load-balancer-1.60-beta`.
@@ -55,7 +55,23 @@ request in flight on the stopped back end), the same as the 6.2 build;
 memory flat (8 to 9 MB), clean exit. valgrind over 50,000 requests: 0
 errors.
 
-Still to do for a release (dougg's decision): version numbers
-(load-balancer 1.62, ssl-bridge 1.62, LDM-load-balancer 1.66), `version.txt`,
-`VersionString` in `m_help.cpp`, the man pages, the RPM specs, the release
-notes ("Built with the DataReel 6.4 library") and the tags.
+## DataReel 6.4.1 update (11/17/2026, not tagged yet)
+
+load-balancer 1.62, ssl-bridge 1.62 and LDM-load-balancer 1.66 bundle the
+DataReel 6.4.1 files (datareel branch `6.4.1`). Every bundled file in
+`include/` and `src/` is now the unmodified DataReel 6.4.1 file: the
+local OpenSSL changes in `gxssl.h` and the ssl-bridge `gxssl.cpp` above
+are part of DataReel 6.4 itself. 6.4.1 adds FD_CLOEXEC on sockets and
+the thread fixes (RUNNING state before the thread starts, monotonic
+timed waits, sleeps without a locked mutex). The servers' own accept()
+calls (`m_thread.cpp`) also set FD_CLOEXEC now. None of the packages use
+gxStream or gxDatagram, so the 6.4 32-byte block header does not apply.
+
+Tests (RHEL 10.2, gcc 14.4.1, -Wall, no warnings): `tests/drlb_tests.py`
+18/18, `tests/ssl_bridge_tests.py` 15/15, `tests/ldm_tests.py` 21/21, and
+a smoke test of each server with Python http.server back ends; the SSL
+bridge accepts TLS 1.2 and TLS 1.3 and refuses TLS 1.0 and TLS 1.1.
+
+Still to do for a release (dougg's decision): the tags
+(`load-balancer-1.62`, `ssl-bridge-1.62`, `LDM-load-balancer-1.66`), the
+RPM builds and the push to aws.

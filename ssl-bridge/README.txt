@@ -1,8 +1,8 @@
-README file for DRLB SSL Bridge 1.61
-Last Modified: 10/31/2026
+README file for DRLB SSL Bridge 1.62
+Last Modified: 11/17/2026
 
-NOTE: This is the final release of the legacy DRLB SSL bridge
-(drlb_ssl_server) package. drlb_server 2.0 (the tcp_load_balancer
+NOTE: 1.62 is a patch release (DataReel 6.4.1 library) of the
+legacy DRLB SSL bridge (drlb_ssl_server) package. drlb_server 2.0 (the tcp_load_balancer
 repository) replaces this package: a drlb_server config with an
 [SSLCONFIG] section runs as the SSL bridge.
 

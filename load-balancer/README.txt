@@ -1,8 +1,8 @@
-DataReel Load Balancer (DRLB) 1.61 Readme File
+DataReel Load Balancer (DRLB) 1.62 Readme File
 DataReel Copyright (c) 2016-2026 DataReel Software Development
 
-NOTE: This is the final release of the legacy DRLB TCP load balancer
-(drlb_server) package. drlb_server 2.0 (the tcp_load_balancer
+NOTE: 1.62 is a patch release (DataReel 6.4.1 library) of the
+legacy DRLB TCP load balancer (drlb_server) package. drlb_server 2.0 (the tcp_load_balancer
 repository) replaces this package.
 
 Online docs:
