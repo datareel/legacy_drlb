@@ -1,5 +1,5 @@
 DRLB TCP load balancer 1.62 release notes
-Prepared 11/17/2026 (not tagged or released yet)
+Released 11/17/2026
 
 1.62 is a patch release of the legacy DRLB TCP load balancer (drlb_server) package.
 

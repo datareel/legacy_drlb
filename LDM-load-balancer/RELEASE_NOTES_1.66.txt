@@ -1,5 +1,5 @@
 DRLB LDM load balancer 1.66 release notes
-Prepared 11/17/2026 (not tagged or released yet)
+Released 11/17/2026
 
 1.66 is a patch release of the legacy DRLB LDM load balancer (drlb_ldm_server) package.
 

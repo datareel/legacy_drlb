@@ -1,14 +1,14 @@
-# legacy_drlb: final releases of the DataReel-based DRLB packages
+# legacy_drlb: releases of the DataReel-based DRLB packages
 
-This repository holds the last releases of the three DRLB packages that
+This repository holds the releases of the three DRLB packages that
 were built on the DataReel library, each in its own folder with its full
 git history:
 
 | Folder | Program | Latest release | Tag |
 |---|---|---|---|
-| `load-balancer/` | `drlb_server`, TCP load balancer | 1.62 (not tagged yet; 1.61 tagged) | `load-balancer-1.61` |
-| `ssl-bridge/` | `drlb_ssl_server`, SSL bridge | 1.62 (not tagged yet; 1.61 tagged) | `ssl-bridge-1.61` |
-| `LDM-load-balancer/` | `drlb_ldm_server`, LDM load balancer | 1.66 (not tagged yet; 1.65 tagged) | `LDM-load-balancer-1.65` |
+| `load-balancer/` | `drlb_server`, TCP load balancer | 1.62 | `load-balancer-1.62` |
+| `ssl-bridge/` | `drlb_ssl_server`, SSL bridge | 1.62 | `ssl-bridge-1.62` |
+| `LDM-load-balancer/` | `drlb_ldm_server`, LDM load balancer | 1.66 | `LDM-load-balancer-1.66` |
 
 Earlier tags from the original repositories are kept with the folder name
 in front, for example `load-balancer-1.60-beta`.
@@ -19,8 +19,8 @@ in front, for example `load-balancer-1.60-beta`.
   in the `tcp_load_balancer` repository: one program, written without the
   DataReel library, that runs as a plain TCP load balancer or, with an
   `[SSLCONFIG]` section in its config, as the SSL bridge. 1.60 and 1.61
-  config files work with 2.0 unchanged. No further releases of these two
-  packages are planned.
+  config files work with 2.0 unchanged. Only maintenance releases of these
+  two packages, such as the DataReel 6.4.1 update, are planned.
 - **LDM-load-balancer** is not replaced. It is maintained only here.
 
 ## Building
@@ -55,7 +55,7 @@ request in flight on the stopped back end), the same as the 6.2 build;
 memory flat (8 to 9 MB), clean exit. valgrind over 50,000 requests: 0
 errors.
 
-## DataReel 6.4.1 update (11/17/2026, not tagged yet)
+## DataReel 6.4.1 releases (11/17/2026)
 
 load-balancer 1.62, ssl-bridge 1.62 and LDM-load-balancer 1.66 bundle the
 DataReel 6.4.1 files (datareel branch `6.4.1`). Every bundled file in
@@ -72,6 +72,5 @@ Tests (RHEL 10.2, gcc 14.4.1, -Wall, no warnings): `tests/drlb_tests.py`
 a smoke test of each server with Python http.server back ends; the SSL
 bridge accepts TLS 1.2 and TLS 1.3 and refuses TLS 1.0 and TLS 1.1.
 
-Still to do for a release (dougg's decision): the tags
-(`load-balancer-1.62`, `ssl-bridge-1.62`, `LDM-load-balancer-1.66`), the
-RPM builds and the push to aws.
+Released 11/17/2026 as tags `load-balancer-1.62`, `ssl-bridge-1.62` and
+`LDM-load-balancer-1.66`, with RHEL 8, 9 and 10 RPMs.
