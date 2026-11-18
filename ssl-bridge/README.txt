@@ -67,9 +67,22 @@ RHEL 9:
 $ ./make_ssl_rpm_package.sh rhel9
 $ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-*.el9.x86_64.rpm
 
-RHEL 8 (NetworkManager and firewalld only):
+RHEL 8 (NetworkManager and firewalld only) has two packages, like
+DRCM 1.49. Install one of them:
+
+drlb_ssl_server: FIPS build on the system OpenSSL 1.1.1 (FIPS 140
+validated), classic TLS, groups and ciphers from the crypto policy:
 $ ./make_ssl_rpm_package.sh rhel8
-$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-*.el8.x86_64.rpm
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-1*.el8.x86_64.rpm
+
+drlb_ssl_server-openssl35: OpenSSL 3.5.9 built in statically,
+post-quantum TLS, no OpenSSL package needed, not for FIPS mode:
+$ ./build_openssl35.sh               # static OpenSSL 3.5.9 in /opt/openssl-3.5
+$ ./make_ssl_rpm_package.sh rhel8-openssl35
+$ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-openssl35-*.el8.x86_64.rpm
+
+Switch a host between them (stop the service first):
+# dnf swap drlb_ssl_server ./drlb_ssl_server-openssl35-<version>-1.el8.x86_64.rpm
 
 Useful RPM command to verify package contents:
 

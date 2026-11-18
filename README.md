@@ -77,10 +77,12 @@ Released 11/17/2026 as tags `load-balancer-1.62`, `ssl-bridge-1.62` and
 
 ## ssl-bridge 1.63: OpenSSL 3.5 on RHEL 8 and post-quantum TLS (in preparation)
 
-The ssl-bridge 1.62 RHEL 8 RPM was built on the RHEL 8 OpenSSL 1.1.1k.
-1.63 requires OpenSSL 3.5 LTS or later at build time (headers), at run
-time (library) and in the RPM (libssl.so.3(OPENSSL_3.5.0)), and adds
-post-quantum TLS: hybrid ML-KEM key exchange first (X25519MLKEM768),
+The ssl-bridge 1.62 RHEL 8 RPM linked the RHEL 8 OpenSSL 1.1.1k with
+nothing that said so. 1.63 follows the DRCM 1.49 model on RHEL 8: two
+packages, `drlb_ssl_server` (FIPS build on the system OpenSSL 1.1.1,
+classic TLS) and `drlb_ssl_server-openssl35` (static OpenSSL 3.5.9,
+post-quantum TLS, `dnf swap` between them). RHEL 9 and 10 need OpenSSL
+3.5 at build time, run time and in the RPM. 1.63 adds post-quantum TLS: hybrid ML-KEM key exchange first (X25519MLKEM768),
 ML-DSA certificates, and the ssl_groups and ssl_sigalgs settings. See
 `ssl-bridge/RELEASE_NOTES_1.63.txt`. load-balancer 1.62 and
 LDM-load-balancer 1.66 do not use OpenSSL (their RHEL 8 RPMs link no
