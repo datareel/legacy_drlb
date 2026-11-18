@@ -43,10 +43,10 @@ SSL config for DR load balancer.
 
 // 11/18/2026: Only built and shipped on OpenSSL 3.5 LTS or later: hybrid
 // ML-KEM key exchange and ML-DSA certificates need 3.5, and older lines
-// are out of support. RHEL 8 builds need the RHEL 8.10 OpenSSL 3.5
-// update (or OPENSSL_PREFIX, see env/linux.env).
+// are out of support. RHEL 8 builds use the EPEL openssl3-devel
+// package (OPENSSL_PKG=openssl3, see env/linux.env).
 #if OPENSSL_VERSION_NUMBER < 0x30500000L
-#error "drlb_ssl_server needs OpenSSL 3.5 or later headers. On RHEL 8 apply the RHEL 8.10 updates that bring OpenSSL 3.5, or build with OPENSSL_PREFIX=<OpenSSL 3.5 install>."
+#error "drlb_ssl_server needs OpenSSL 3.5 or later headers. On RHEL 8 install the EPEL openssl3-devel package and build with OPENSSL_PKG=openssl3."
 #endif
 
 // 11/18/2026: Default key exchange groups (OpenSSL 3.5 tuple syntax). The
@@ -76,7 +76,7 @@ int check_openssl_version()
 {
   if(OpenSSL_version_num() < 0x30500000UL) {
     NT_print("ERROR - drlb_ssl_server needs OpenSSL 3.5 or later, the library is", OpenSSL_version(OPENSSL_VERSION));
-    NT_print("ERROR - On RHEL 8 apply the RHEL 8.10 updates that bring OpenSSL 3.5");
+    NT_print("ERROR - On RHEL 8 install the EPEL openssl3-libs package (OpenSSL 3.5)");
     return 1;
   }
   return 0;

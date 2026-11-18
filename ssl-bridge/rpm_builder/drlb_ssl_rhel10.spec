@@ -9,7 +9,7 @@ Distribution: Datareel Open Source
 URL: https://datareel.com/drlb/ssl.html
 Vendor: Datareel Open Source
 # 11/18/2026: OpenSSL 3.5 LTS or later on every RHEL version (RHEL 8:
-# RHEL 8.10 with the OpenSSL 3.5 update). The symbol version names the
+# the EPEL openssl3-libs package). The symbol version names the
 # library, not a package.
 Requires: libssl.so.3(OPENSSL_3.5.0)(64bit)
 Requires: libcrypto.so.3(OPENSSL_3.5.0)(64bit)

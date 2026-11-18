@@ -75,7 +75,7 @@ if [ -n "${OPENSSL_PREFIX}" ]; then OPENSSL_INC="-I${OPENSSL_PREFIX}/include"; f
 OPENSSL_HDR=$(printf '#include <openssl/opensslv.h>\n#if OPENSSL_VERSION_NUMBER < 0x30500000L\n#error old\n#endif\nOPENSSL_VERSION_TEXT\n' | g++ ${OPENSSL_INC} -E -P -x c++ - 2>/dev/null | tail -1)
 if [ -z "${OPENSSL_HDR}" ]; then
     echo "ERROR - OpenSSL 3.5 or later headers are required (openssl-devel)."
-    echo "ERROR - On RHEL 8 apply the RHEL 8.10 updates that bring OpenSSL 3.5."
+    echo "ERROR - On RHEL 8 install the EPEL openssl3-devel package (OpenSSL 3.5)."
     exit 1
 fi
 echo "Building with ${OPENSSL_HDR}"
