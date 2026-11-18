@@ -133,7 +133,10 @@ fi
 tar cfz ${HOME}/rpmbuild/BUILD/drlb_ssl_server.tar.gz *
 
 cd ${BUILDDIR_tmp}/rpmbuild/SPECS
-rpmbuild -ba --buildroot=${BUILDDIR_tmp}/rpmbuild/BUILDROOT drlb_ssl.spec
+# 11/18/2026: The RPM header records the build host. Use a neutral name
+# so the name of the machine that built the release is not in the package.
+DRLB_BUILDHOST=${DRLB_BUILDHOST:-datareel-build}
+rpmbuild -ba --define "_buildhost ${DRLB_BUILDHOST}" --buildroot=${BUILDDIR_tmp}/rpmbuild/BUILDROOT drlb_ssl.spec
 
 # 11/18/2026: The package must require OpenSSL 3.5 libraries and nothing older
 RPM=$(ls ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-${Version}-${Release}.x86_64.rpm)
@@ -142,6 +145,12 @@ if rpm -qpR "${RPM}" | grep -q 'libssl.so.1' || ! rpm -qpR "${RPM}" | grep -q 'l
     rpm -qpR "${RPM}" | grep -E 'ssl|crypto'
     exit 1
 fi
+for r in "${RPM}" ${HOME}/rpmbuild/SRPMS/drlb_ssl_server-${Version}-${Release}.src.rpm; do
+    if [ "$(rpm -qp --qf '%{BUILDHOST}' "${r}")" != "${DRLB_BUILDHOST}" ]; then
+        echo "ERROR - ${r} build host is not ${DRLB_BUILDHOST}"
+        exit 1
+    fi
+done
 echo "OpenSSL in ${RPM##*/}: ${OPENSSL_HDR}"
 
 rm -f ${HOME}/rpmbuild/BUILD/drlb_ssl_server.tar.gz
