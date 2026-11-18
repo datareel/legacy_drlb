@@ -5,15 +5,33 @@ BUILDDIR_tmp="/tmp/drlb_ssl_build_${USERNAME}"
 
 if [ -z $1 ]; then
     echo "You must supply a OS version"
-    echo "Usage: ${0} rhel8|rhel9|rhel10"
+    echo "Usage: ${0} rhel8|rhel8-openssl35|rhel9|rhel10"
     exit 1
 fi
 
 OS=${1,,}
 
+# 11/18/2026: OpenSSL per package (the RHEL 8 pair follows DRCM 1.49):
+#   rhel8            drlb_ssl_server: RHEL 8 system OpenSSL 1.1.1 (FIPS 140
+#                    validated by Red Hat), FIPS build, classic TLS
+#   rhel8-openssl35  drlb_ssl_server-openssl35: static OpenSSL 3.5
+#                    (build_openssl35.sh first), post-quantum TLS. It
+#                    provides and conflicts with drlb_ssl_server; switch with
+#                    "dnf swap drlb_ssl_server drlb_ssl_server-openssl35"
+#   rhel9, rhel10    drlb_ssl_server: system OpenSSL 3.5, post-quantum TLS
+FLAVOR=system35
+NAME=drlb_ssl_server
+SPEC_OS=${OS}
 case "${OS}" in
-    rhel8|rhel9|rhel10) ;;
-    *) echo "ERROR - Unsupported OS version: ${1}. Use rhel8, rhel9, or rhel10"; exit 1 ;;
+    rhel8) FLAVOR=fips ;;
+    rhel8-openssl35) FLAVOR=static35; NAME=drlb_ssl_server-openssl35; SPEC_OS=rhel8
+        OPENSSL35_PREFIX=${OPENSSL35_PREFIX:-/opt/openssl-3.5}
+        if [ ! -f "${OPENSSL35_PREFIX}/lib64/libssl.a" ]; then
+            echo "ERROR - No static OpenSSL 3.5 in ${OPENSSL35_PREFIX}; run build_openssl35.sh first"
+            exit 1
+        fi ;;
+    rhel9|rhel10) ;;
+    *) echo "ERROR - Unsupported OS version: ${1}. Use rhel8, rhel8-openssl35, rhel9, or rhel10"; exit 1 ;;
 esac
 
 if [ ! -z "${2}" ]; then BUILDDIR_tmp="${2}"; fi
@@ -42,7 +60,17 @@ if [ ! -d ${BUILDDIR_tmp}/rpmbuild/SPECS ]; then
     exit 1
 fi
 
-cp -fv drlb_ssl_${OS}.spec ${BUILDDIR_tmp}/rpmbuild/SPECS/drlb_ssl.spec
+cp -fv drlb_ssl_${SPEC_OS}.spec ${BUILDDIR_tmp}/rpmbuild/SPECS/drlb_ssl.spec
+if [ "${FLAVOR}" == "static35" ]; then
+    # Provides/Conflicts go after Release:, where %{version} and %{release}
+    # are defined; no OpenSSL package is required (OpenSSL is built in)
+    sed -i -e 's/^Name: drlb_ssl_server$/Name: drlb_ssl_server-openssl35/' \
+           -e 's/^\(Release: .*\)$/\1\nProvides: drlb_ssl_server = %{version}-%{release}\nConflicts: drlb_ssl_server/' \
+           -e 's/^Summary: .*/Summary: Datareel SSL Load Balancer RPM, OpenSSL 3.5 static build (post-quantum TLS)/' \
+           -e '/^Requires: openssl-libs$/d' \
+           ${BUILDDIR_tmp}/rpmbuild/SPECS/drlb_ssl.spec
+    grep -q '^Name: drlb_ssl_server-openssl35' ${BUILDDIR_tmp}/rpmbuild/SPECS/drlb_ssl.spec || { echo "ERROR - spec Name not changed"; exit 1; }
+fi
 Version=$(head -15 ${BUILDDIR_tmp}/rpmbuild/SPECS/drlb_ssl.spec | grep 'Version:' | awk -F: '{ print $2 }')
 Version=$( echo "${Version}" | sed s/' '//g)
 Release=$(head -15 ${BUILDDIR_tmp}/rpmbuild/SPECS/drlb_ssl.spec | grep 'Release:' | awk -F: '{ print $2 }')
@@ -60,30 +88,43 @@ source ../env/gnu_env.sh
 cd ../ssl_bridge
 make clean_lib
 make clean
-# 11/18/2026: OpenSSL 3.5 or later only (ssl_utils.cpp also stops older builds)
-# RHEL 8: the RHEL 8 openssl-devel is 1.1.1k. Use the EPEL openssl3-devel
-# (OpenSSL 3.5) when it is installed and nothing else was chosen.
-if [ "${OS}" = "rhel8" ] && [ -z "${OPENSSL_PKG}" ] && [ -z "${OPENSSL_PREFIX}" ] && \
-   pkg-config --exists openssl3 2>/dev/null; then
-    export OPENSSL_PKG=openssl3
-    echo "RHEL 8: building with pkg-config openssl3 $(pkg-config --modversion openssl3)"
-fi
-export OPENSSL_PKG OPENSSL_PREFIX
+# 11/18/2026: OpenSSL 3.5 or later, except the RHEL 8 FIPS build (1.1.1);
+# ssl_utils.cpp also stops older builds
+unset FIPS_BUILD OPENSSL_PREFIX OPENSSL_STATIC
+MIN=0x30500000L
+case "${FLAVOR}" in
+    fips) export FIPS_BUILD=1; MIN=0x10101000L ;;
+    static35) export OPENSSL_PREFIX=${OPENSSL35_PREFIX} OPENSSL_STATIC=1 ;;
+esac
 OPENSSL_INC=""
 if [ -n "${OPENSSL_PKG}" ]; then OPENSSL_INC=$(pkg-config --cflags ${OPENSSL_PKG}); fi
 if [ -n "${OPENSSL_PREFIX}" ]; then OPENSSL_INC="-I${OPENSSL_PREFIX}/include"; fi
-OPENSSL_HDR=$(printf '#include <openssl/opensslv.h>\n#if OPENSSL_VERSION_NUMBER < 0x30500000L\n#error old\n#endif\nOPENSSL_VERSION_TEXT\n' | g++ ${OPENSSL_INC} -E -P -x c++ - 2>/dev/null | tail -1)
+OPENSSL_HDR=$(printf "#include <openssl/opensslv.h>\n#if OPENSSL_VERSION_NUMBER < ${MIN}\n#error old\n#endif\nOPENSSL_VERSION_TEXT\n" | g++ ${OPENSSL_INC} -E -P -x c++ - 2>/dev/null | tail -1)
 if [ -z "${OPENSSL_HDR}" ]; then
-    echo "ERROR - OpenSSL 3.5 or later headers are required (openssl-devel)."
-    echo "ERROR - On RHEL 8 install the EPEL openssl3-devel package (OpenSSL 3.5)."
+    echo "ERROR - The OpenSSL headers are too old for ${OS}."
+    echo "ERROR - RHEL 8: use rhel8 (FIPS build, system OpenSSL) or rhel8-openssl35."
     exit 1
 fi
-echo "Building with ${OPENSSL_HDR}"
+echo "Building ${NAME} (${FLAVOR}) with ${OPENSSL_HDR}"
 make
-if ldd drlb_ssl_server | grep -q 'libssl.so.1'; then
-    echo "ERROR - drlb_ssl_server links an OpenSSL older than 3: $(ldd drlb_ssl_server | grep libssl)"
-    exit 1
-fi
+LINKED=$(./drlb_ssl_server --version | grep '^Linked with:')
+echo "drlb_ssl_server ${LINKED}"
+case "${FLAVOR}" in
+    fips)
+        readelf -d drlb_ssl_server | grep -q 'NEEDED.*libssl.so.1.1' || { echo "ERROR - the rhel8 package must link the system OpenSSL 1.1.1"; exit 1; }
+        echo "${LINKED}" | grep -q 'FIPS build' || { echo "ERROR - not a FIPS build"; exit 1; } ;;
+    static35)
+        if readelf -d drlb_ssl_server | grep -q 'NEEDED.*lib\(ssl\|crypto\)'; then
+            echo "ERROR - the openssl35 package must not link a shared libssl/libcrypto"; exit 1
+        fi
+        readelf -d drlb_ssl_server | grep -qE 'RPATH|RUNPATH' && { echo "ERROR - the openssl35 package must have no rpath"; exit 1; }
+        echo "${LINKED}" | grep -q 'OpenSSL 3\.5\..*, static, ' || { echo "ERROR - not a static OpenSSL 3.5 build"; exit 1; } ;;
+    *)
+        if readelf -d drlb_ssl_server | grep -q 'libssl.so.1'; then
+            echo "ERROR - drlb_ssl_server links an OpenSSL older than 3: $(ldd drlb_ssl_server | grep libssl)"
+            exit 1
+        fi ;;
+esac
 
 mkdir -p ${Build}/etc/drlb
 chmod 755 ${Build}/etc/drlb
@@ -138,20 +179,25 @@ cd ${BUILDDIR_tmp}/rpmbuild/SPECS
 DRLB_BUILDHOST=${DRLB_BUILDHOST:-datareel-build}
 rpmbuild -ba --define "_buildhost ${DRLB_BUILDHOST}" --buildroot=${BUILDDIR_tmp}/rpmbuild/BUILDROOT drlb_ssl.spec
 
-# 11/18/2026: The package must require OpenSSL 3.5 libraries and nothing older
-RPM=$(ls ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-${Version}-${Release}.x86_64.rpm)
-if rpm -qpR "${RPM}" | grep -q 'libssl.so.1' || ! rpm -qpR "${RPM}" | grep -q 'libssl.so.3(OPENSSL_3.5.0)'; then
-    echo "ERROR - ${RPM} does not require OpenSSL 3.5:"
-    rpm -qpR "${RPM}" | grep -E 'ssl|crypto'
-    exit 1
-fi
-for r in "${RPM}" ${HOME}/rpmbuild/SRPMS/drlb_ssl_server-${Version}-${Release}.src.rpm; do
+# 11/18/2026: The package's OpenSSL requirements must match its flavor
+RPM=$(ls ${HOME}/rpmbuild/RPMS/x86_64/${NAME}-${Version}-${Release}.x86_64.rpm)
+REQ=$(rpm -qpR "${RPM}")
+case "${FLAVOR}" in
+    fips) echo "${REQ}" | grep -q 'libssl.so.1.1' || { echo "ERROR - ${RPM} does not require the system OpenSSL 1.1.1"; exit 1; } ;;
+    static35) if echo "${REQ}" | grep -qE 'libssl|libcrypto|openssl'; then
+                  echo "ERROR - ${RPM} requires a shared OpenSSL:"; echo "${REQ}" | grep -E 'ssl|crypto'; exit 1
+              fi ;;
+    *) if echo "${REQ}" | grep -q 'libssl.so.1' || ! echo "${REQ}" | grep -q 'libssl.so.3(OPENSSL_3.5.0)'; then
+           echo "ERROR - ${RPM} does not require OpenSSL 3.5:"; echo "${REQ}" | grep -E 'ssl|crypto'; exit 1
+       fi ;;
+esac
+for r in "${RPM}" ${HOME}/rpmbuild/SRPMS/${NAME}-${Version}-${Release}.src.rpm; do
     if [ "$(rpm -qp --qf '%{BUILDHOST}' "${r}")" != "${DRLB_BUILDHOST}" ]; then
         echo "ERROR - ${r} build host is not ${DRLB_BUILDHOST}"
         exit 1
     fi
 done
-echo "OpenSSL in ${RPM##*/}: ${OPENSSL_HDR}"
+echo "OpenSSL in ${RPM##*/}: ${OPENSSL_HDR}, ${FLAVOR}, ${LINKED}"
 
 rm -f ${HOME}/rpmbuild/BUILD/drlb_ssl_server.tar.gz
 rm -rf ${BUILDDIR_tmp}

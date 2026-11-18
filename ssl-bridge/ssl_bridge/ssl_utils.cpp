@@ -38,15 +38,36 @@ SSL config for DR load balancer.
 #include "ssl_config.h"
 #include "ssl_utils.h"
 
+#include <stdio.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
+#include <openssl/objects.h>
 #include <openssl/opensslv.h>
 
-// 11/18/2026: Only built and shipped on OpenSSL 3.5 LTS or later: hybrid
-// ML-KEM key exchange and ML-DSA certificates need 3.5, and older lines
-// are out of support. RHEL 8 builds use the EPEL openssl3-devel
-// package (OPENSSL_PKG=openssl3, see env/linux.env).
+// 11/18/2026: OpenSSL 3.5 LTS or later: hybrid ML-KEM key exchange and
+// ML-DSA certificates need 3.5. RHEL 9 and 10 use the system OpenSSL
+// 3.5; the RHEL 8 drlb_ssl_server-openssl35 package links a static
+// OpenSSL 3.5 (rpm_builder/build_openssl35.sh, OPENSSL_PREFIX and
+// OPENSSL_STATIC=1 in env/linux.env).
+//
+// The one exception is the RHEL 8 FIPS build (FIPS_BUILD=1, the RHEL 8
+// drlb_ssl_server package, as in DRCM 1.49): it links the RHEL 8 system
+// OpenSSL 1.1.1, which Red Hat validated for FIPS 140, and has no
+// post-quantum TLS.
+#if defined(DRLB_FIPS_BUILD)
+#if OPENSSL_VERSION_NUMBER < 0x10101000L
+#error "The drlb_ssl_server FIPS build needs the system OpenSSL 1.1.1 or later headers."
+#endif
+#define DRLB_MIN_OPENSSL 0x10101000UL
+#else
 #if OPENSSL_VERSION_NUMBER < 0x30500000L
-#error "drlb_ssl_server needs OpenSSL 3.5 or later headers. On RHEL 8 install the EPEL openssl3-devel package and build with OPENSSL_PKG=openssl3."
+#error "drlb_ssl_server needs OpenSSL 3.5 or later headers. On RHEL 8 build the static OpenSSL 3.5 (rpm_builder/build_openssl35.sh, OPENSSL_PREFIX=/opt/openssl-3.5 OPENSSL_STATIC=1) or the FIPS build on the system OpenSSL (FIPS_BUILD=1)."
+#endif
+#define DRLB_MIN_OPENSSL 0x30500000UL
+#endif
+
+#ifndef DRLB_OPENSSL_FLAVOR
+#define DRLB_OPENSSL_FLAVOR "system"
 #endif
 
 // 11/18/2026: Default key exchange groups (OpenSSL 3.5 tuple syntax). The
@@ -72,23 +93,69 @@ static const char *DefaultSigalgs =
 
 int check_openssl_version()
 // 11/18/2026: The headers are checked at build time; this catches an
-// older shared library at run time.
+// older shared library at run time (3.5, or 1.1.1 for the FIPS build).
 {
-  if(OpenSSL_version_num() < 0x30500000UL) {
+  if(OpenSSL_version_num() < DRLB_MIN_OPENSSL) {
+#if defined(DRLB_FIPS_BUILD)
+    NT_print("ERROR - The drlb_ssl_server FIPS build needs OpenSSL 1.1.1 or later, the library is", OpenSSL_version(OPENSSL_VERSION));
+#else
     NT_print("ERROR - drlb_ssl_server needs OpenSSL 3.5 or later, the library is", OpenSSL_version(OPENSSL_VERSION));
-    NT_print("ERROR - On RHEL 8 install the EPEL openssl3-libs package (OpenSSL 3.5)");
+    NT_print("ERROR - On RHEL 8 install the drlb_ssl_server-openssl35 package (OpenSSL 3.5 built in)");
+#endif
     return 1;
   }
   return 0;
+}
+
+int fips_mode()
+// 11/18/2026: 1 if the system or OpenSSL is in FIPS mode
+{
+  FILE *fp = fopen("/proc/sys/crypto/fips_enabled", "r");
+  if(fp) {
+    int c = fgetc(fp);
+    fclose(fp);
+    if(c == '1') return 1;
+  }
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+  return EVP_default_properties_is_fips_enabled(0) == 1;
+#else
+  return FIPS_mode() != 0;
+#endif
+}
+
+int pqc_build()
+// 11/18/2026: 1 if this build has the post-quantum TLS algorithms
+{
+#if defined(DRLB_FIPS_BUILD)
+  return 0;
+#else
+  return 1;
+#endif
+}
+
+void openssl_build_info(gxString &s)
+// 11/18/2026: The OpenSSL the program runs with, for --version and the log
+{
+  s << clear << "Linked with: " << OpenSSL_version(OPENSSL_VERSION) << ", " << DRLB_OPENSSL_FLAVOR;
+#if defined(DRLB_FIPS_BUILD)
+  s << ", FIPS build (system crypto policy, no post-quantum TLS)";
+#else
+  s << ", post-quantum TLS (ML-KEM, ML-DSA)";
+#endif
+  if(fips_mode()) s << ", FIPS mode on";
 }
 
 int set_groups_sigalgs(SSL_CTX *ctx)
 // 11/18/2026: Key exchange groups and signature algorithms for one
 // context. Empty settings use the defaults above, except in FIPS mode
 // where the crypto policy lists are kept. "system" keeps the crypto
-// policy lists.
+// policy lists. The FIPS build always keeps the crypto policy lists.
 {
-  int fips = EVP_default_properties_is_fips_enabled(0) == 1;
+#if defined(DRLB_FIPS_BUILD)
+  (void)ctx;
+  return 0;
+#else
+  int fips = fips_mode();
   gxString groups = sslcfg->ssl_groups, sigalgs = sslcfg->ssl_sigalgs;
   if(groups.is_null()) groups = fips ? "system" : DefaultGroups;
   if(sigalgs.is_null()) sigalgs = fips ? "system" : DefaultSigalgs;
@@ -103,6 +170,7 @@ int set_groups_sigalgs(SSL_CTX *ctx)
     return 1;
   }
   return 0;
+#endif
 }
 
 int init_ssl_cert()
@@ -125,7 +193,8 @@ int init_ssl_cert()
     }
   }
 
-  NT_print("OpenSSL version:", OpenSSL_version(OPENSSL_VERSION));
+  openssl_build_info(sbuf);
+  NT_print(sbuf.c_str());
   if(check_openssl_version() != 0) return 1;
 
   // 10/25/2026: Only TLS 1.2 and TLS 1.3. SSLv2, SSLv3, TLS 1.0, TLS 1.1
@@ -138,7 +207,7 @@ int init_ssl_cert()
   else if(sslcfg->ssl_protocol == "TLSV1_2") {
     sslcfg->meth = gxSSL_TLSv1_2;
     NT_print("SSL connections will only use TLS 1.2"); 
-    NT_print("WARNING - TLS 1.2 has no post-quantum key exchange, use ssl_protocol = TLS or TLSv1_3");
+    if(pqc_build()) NT_print("WARNING - TLS 1.2 has no post-quantum key exchange, use ssl_protocol = TLS or TLSv1_3");
   }
   else if(sslcfg->ssl_protocol == "TLSV1_3") {
     sslcfg->meth = gxSSL_TLSv1_3;
@@ -173,14 +242,26 @@ int init_ssl_cert()
     return 1;
   }
   if(EVP_PKEY *pk = SSL_CTX_get0_privatekey(ssl->GetCTX())) {
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
     const char *type = EVP_PKEY_get0_type_name(pk);
+#else
+    const char *type = OBJ_nid2sn(EVP_PKEY_base_id(pk));
+#endif
     NT_print("Certificate key type:", type ? type : "unknown");
   }
   if(set_ssl_ciphers(ssl->GetCTX()) != 0) return 1;
   if(set_groups_sigalgs(ssl->GetCTX()) != 0) return 1;
-  if(sslcfg->ssl_groups.is_null()) {
-    NT_print("TLS key exchange groups:", EVP_default_properties_is_fips_enabled(0) == 1 ?
-	     "system (FIPS mode)" : "default (hybrid ML-KEM first)");
+  if(!pqc_build()) {
+    NT_print("INFO - FIPS build: post-quantum TLS (ML-KEM key exchange, ML-DSA certificates) is not available");
+    NT_print("INFO - TLS key exchange groups and signature algorithms follow the system crypto policy");
+    gxString g = sslcfg->ssl_groups, a = sslcfg->ssl_sigalgs;
+    g.ToUpper(); a.ToUpper();
+    if((!g.is_null() && g != "SYSTEM") || (!a.is_null() && a != "SYSTEM")) {
+      NT_print("WARNING - ssl_groups and ssl_sigalgs are ignored in the FIPS build");
+    }
+  }
+  else if(sslcfg->ssl_groups.is_null()) {
+    NT_print("TLS key exchange groups:", fips_mode() ? "system (FIPS mode)" : "default (hybrid ML-KEM first)");
   }
   else {
     NT_print("TLS key exchange groups:", sslcfg->ssl_groups.c_str());
@@ -222,6 +303,12 @@ int init_ssl_cert()
 	NT_print("ERROR - Check ssl_backend_ca_list_file:", sslcfg->ssl_backend_ca_list_file.c_str());
       }
       return 1;
+    }
+    // 11/18/2026: The static OpenSSL's default trust paths are under its
+    // own prefix, so also load the RHEL system trust store
+    if(sslcfg->ssl_verify_backend_cert && sslcfg->ssl_backend_ca_list_file.is_null() &&
+       futils_exists("/etc/pki/tls/certs/ca-bundle.crt")) {
+      SSL_CTX_load_verify_locations(b->GetCTX(), "/etc/pki/tls/certs/ca-bundle.crt", 0);
     }
     if(set_ssl_ciphers(b->GetCTX()) != 0) return 1;
     if(set_groups_sigalgs(b->GetCTX()) != 0) return 1;

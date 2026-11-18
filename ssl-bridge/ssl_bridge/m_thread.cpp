@@ -488,7 +488,11 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
   }
   if(servercfg->log_level >= 4) { // 11/18/2026: Negotiated protocol, cipher and key exchange group
     SSL *fs = s->openssl->GetSSL();
+    #if OPENSSL_VERSION_NUMBER >= 0x30200000L
     const char *g = SSL_get0_group_name(fs);
+#else
+    const char *g = "n/a";
+#endif
     sbuf << clear << "[" << seq_num << "]: Frontend " << SSL_get_version(fs) << " "
 	 << SSL_get_cipher_name(fs) << " group " << (g ? g : "none");
     LogMessage(sbuf.c_str());
@@ -653,7 +657,11 @@ int LBClientRequestThread::connect_backend(ClientSocket_t *s, LBnode *n, const c
     }
     if(servercfg->log_level >= 4) { // 11/18/2026: Negotiated protocol, cipher and key exchange group
       SSL *bs = s->openssl_client->GetSSL();
+      #if OPENSSL_VERSION_NUMBER >= 0x30200000L
       const char *g = SSL_get0_group_name(bs);
+#else
+      const char *g = "n/a";
+#endif
       sbuf << clear << "[" << seq_num << "]: Backend " << SSL_get_version(bs) << " "
 	   << SSL_get_cipher_name(bs) << " group " << (g ? g : "none");
       LogMessage(sbuf.c_str());

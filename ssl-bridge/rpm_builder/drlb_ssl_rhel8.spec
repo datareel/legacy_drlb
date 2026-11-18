@@ -8,11 +8,12 @@ License: GPL
 Distribution: Datareel Open Source
 URL: https://datareel.com/drlb/ssl.html
 Vendor: Datareel Open Source
-# 11/18/2026: OpenSSL 3.5 LTS or later on every RHEL version (RHEL 8:
-# the EPEL openssl3-libs package). The symbol version names the
-# library, not a package.
-Requires: libssl.so.3(OPENSSL_3.5.0)(64bit)
-Requires: libcrypto.so.3(OPENSSL_3.5.0)(64bit)
+# 11/18/2026: RHEL 8 has two packages, like DRCM 1.49. drlb_ssl_server
+# (this spec) links the system OpenSSL 1.1.1 (FIPS build, classic TLS);
+# drlb_ssl_server-openssl35 is made from this spec by
+# make_ssl_rpm_package.sh rhel8-openssl35 with OpenSSL 3.5 built in (the
+# openssl-libs line is removed there).
+Requires: openssl-libs
 Requires: systemd
 Requires: bash
 Requires(pre): shadow-utils
@@ -53,15 +54,19 @@ exit 0
 
 %post -p /bin/sh
 
+# The other RHEL 8 build (drlb_ssl_server / drlb_ssl_server-openssl35)
+# installed in the same transaction is a "dnf swap": leave the service as it is
+drlb_other_build() { rpm -q drlb_ssl_server drlb_ssl_server-openssl35 2>/dev/null | grep -v -e 'not installed' -e "^%{name}-%{version}-%{release}" | grep -q . ; }
 if [ $1 -eq 1 ] ; then 
     # Initial installation 
-    systemctl preset drlb_ssl_server.service >/dev/null 2>&1 || : 
+    drlb_other_build || systemctl preset drlb_ssl_server.service >/dev/null 2>&1 || : 
 fi
 
 %preun -p /bin/sh
 
-if [ $1 -eq 0 ] ; then 
-    # Package removal, not upgrade 
+drlb_other_build() { rpm -q drlb_ssl_server drlb_ssl_server-openssl35 2>/dev/null | grep -v -e 'not installed' -e "^%{name}-%{version}-%{release}" | grep -q . ; }
+if [ $1 -eq 0 ] && ! drlb_other_build ; then 
+    # Package removal, not upgrade or a swap to the other RHEL 8 build 
     systemctl --no-reload disable drlb_ssl_server.service > /dev/null 2>&1 || : 
     systemctl stop drlb_ssl_server.service > /dev/null 2>&1 || : 
 fi

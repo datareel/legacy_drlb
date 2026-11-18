@@ -36,6 +36,7 @@ Help functions for Datareel SSL load balancer.
 
 #include "drlb_server.h"
 #include "m_help.h"
+#include "ssl_utils.h"
 
 // Version number, program  and publisher info
 const char *VersionString = "1.63";
@@ -85,6 +86,9 @@ void VersionMessage()
   cout << ProgramDescription << " version " << VersionString  << "\n" 
 	      << flush;
   cout << "Produced by: " << ProducedBy << "\n" << flush;
+  gxString linked; // 11/18/2026: the OpenSSL this build runs with
+  openssl_build_info(linked);
+  cout << linked.c_str() << "\n" << flush;
   cout << "\n" << flush;
 }
 
