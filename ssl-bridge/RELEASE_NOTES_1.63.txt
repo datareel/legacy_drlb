@@ -1,3 +1,50 @@
+DRLB SSL bridge 1.63 release notes
+11/18/2026 (not yet released)
+
+1.63 is a patch release of the legacy DRLB SSL bridge (drlb_ssl_server)
+package: OpenSSL 3.5 on RHEL 8 and post-quantum TLS.
+
+OpenSSL 3.5 on RHEL 8
+---------------------
+* The 1.62 RHEL 8 RPM (drlb_ssl_server-1.62-1.el8) was built on the RHEL 8
+  OpenSSL 1.1.1k (it links libssl.so.1.1). DataReel only ships builds on
+  OpenSSL 3.5 LTS or later, so 1.63 replaces it. The RHEL 9 and RHEL 10
+  1.62 RPMs were already on OpenSSL 3.5.
+* The build stops on OpenSSL headers older than 3.5
+  (ssl_bridge/ssl_utils.cpp), the server stops at start if the OpenSSL
+  library is older than 3.5, the RPM requires
+  libssl.so.3(OPENSSL_3.5.0) and libcrypto.so.3(OPENSSL_3.5.0), and
+  rpm_builder/make_ssl_rpm_package.sh refuses older headers, a binary
+  that links libssl.so.1.x, or an RPM without the OpenSSL 3.5 requires.
+* New build option OPENSSL_PREFIX=/path (env/linux.env) for an OpenSSL
+  3.5 install that is not the system one (-I, -L and a matching rpath).
+* RHEL 8 hosts need RHEL 8.10 with the updates that bring OpenSSL 3.5.
+
+Post-quantum TLS
+----------------
+* Key exchange groups are set by the bridge, with the hybrid ML-KEM
+  groups (FIPS 203) first: X25519MLKEM768, SecP256r1MLKEM768,
+  SecP384r1MLKEM1024, then X25519, secp256r1, X448, secp384r1,
+  secp521r1, ffdhe2048, ffdhe3072, on the frontend and on TLS backends.
+  The RHEL 8 and RHEL 9 crypto policies do not offer ML-KEM, so 1.62 on
+  those releases used classical X25519 only. Classical clients and
+  backends still connect.
+* ML-DSA (FIPS 204) certificates work on the frontend and on backends:
+  the default signature algorithm list adds mldsa65, mldsa87 and
+  mldsa44 to the ECDSA, EdDSA and RSA algorithms of the RHEL DEFAULT
+  policy. The log shows the certificate key type at start.
+* New [SSLCONFIG] settings ssl_groups and ssl_sigalgs. Empty (default)
+  uses the lists above, "system" keeps the crypto policy lists, and in
+  FIPS mode both default to "system". A bad value is a config error.
+* ssl_protocol = TLSv1_2 logs a warning (no post-quantum key exchange
+  in TLS 1.2).
+* log_level = 4 logs the TLS version, cipher and group of every
+  frontend and backend connection.
+* The bundled DataReel 6.4.1 files are unchanged.
+* New tests/pqc_tests.py (25 checks).
+
+======================================================================
+
 DRLB SSL bridge 1.62 release notes
 Released 11/17/2026
 

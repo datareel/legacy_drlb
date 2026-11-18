@@ -56,6 +56,8 @@ struct SSLconfig {
   gxString ssl_protocol;
   gxString ssl_cipher_list;   // TLS 1.2 ciphers, system crypto policy if empty
   gxString ssl_ciphersuites;  // TLS 1.3 cipher suites, system crypto policy if empty
+  gxString ssl_groups;   // 11/18/2026: Key exchange groups, ML-KEM first by default, "system" = crypto policy
+  gxString ssl_sigalgs;  // 11/18/2026: Signature algorithms, ML-DSA added by default, "system" = crypto policy
   gxSSLMethod meth;
   gxSSL openssl; // Frontend server context
   gxSSL backend; // 10/25/2026: Client context shared by all backend connections

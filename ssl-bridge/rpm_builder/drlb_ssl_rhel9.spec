@@ -1,6 +1,6 @@
 BuildArch: x86_64
 Name: drlb_ssl_server
-Version: 1.62
+Version: 1.63
 Release: 1.el9
 Summary: Datareel SSL Load Balancer RPM
 Group: System Environment/Daemons
@@ -8,7 +8,11 @@ License: GPL
 Distribution: Datareel Open Source
 URL: https://datareel.com/drlb/ssl.html
 Vendor: Datareel Open Source
-Requires: openssl-libs
+# 11/18/2026: OpenSSL 3.5 LTS or later on every RHEL version (RHEL 8:
+# RHEL 8.10 with the OpenSSL 3.5 update). The symbol version names the
+# library, not a package.
+Requires: libssl.so.3(OPENSSL_3.5.0)(64bit)
+Requires: libcrypto.so.3(OPENSSL_3.5.0)(64bit)
 Requires: systemd
 Requires: bash
 Requires(pre): shadow-utils
@@ -69,6 +73,12 @@ if [ $1 -ge 1 ] ; then
 fi
 
 %changelog
+* Wed Nov 18 2026 Datareel <datareel.com>
+- Version 1.63, a patch release of this legacy package
+- Built and run only on OpenSSL 3.5 LTS or later. The 1.62 RHEL 8 RPM
+  was built on OpenSSL 1.1.1k by mistake.
+- Post-quantum TLS: hybrid ML-KEM key exchange (X25519MLKEM768 first),
+  ML-DSA certificates, new ssl_groups and ssl_sigalgs settings
 * Tue Nov 17 2026 Datareel <datareel.com>
 - Version 1.62, a patch release of this legacy package
 - DataReel 6.4.1 library update (was 6.4 beta 1)

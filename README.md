@@ -7,7 +7,7 @@ git history:
 | Folder | Program | Latest release | Tag |
 |---|---|---|---|
 | `load-balancer/` | `drlb_server`, TCP load balancer | 1.62 | `load-balancer-1.62` |
-| `ssl-bridge/` | `drlb_ssl_server`, SSL bridge | 1.62 | `ssl-bridge-1.62` |
+| `ssl-bridge/` | `drlb_ssl_server`, SSL bridge | 1.62 (1.63 in preparation) | `ssl-bridge-1.62` |
 | `LDM-load-balancer/` | `drlb_ldm_server`, LDM load balancer | 1.66 | `LDM-load-balancer-1.66` |
 
 Earlier tags from the original repositories are kept with the folder name
@@ -74,3 +74,14 @@ bridge accepts TLS 1.2 and TLS 1.3 and refuses TLS 1.0 and TLS 1.1.
 
 Released 11/17/2026 as tags `load-balancer-1.62`, `ssl-bridge-1.62` and
 `LDM-load-balancer-1.66`, with RHEL 8, 9 and 10 RPMs.
+
+## ssl-bridge 1.63: OpenSSL 3.5 on RHEL 8 and post-quantum TLS (in preparation)
+
+The ssl-bridge 1.62 RHEL 8 RPM was built on the RHEL 8 OpenSSL 1.1.1k.
+1.63 requires OpenSSL 3.5 LTS or later at build time (headers), at run
+time (library) and in the RPM (libssl.so.3(OPENSSL_3.5.0)), and adds
+post-quantum TLS: hybrid ML-KEM key exchange first (X25519MLKEM768),
+ML-DSA certificates, and the ssl_groups and ssl_sigalgs settings. See
+`ssl-bridge/RELEASE_NOTES_1.63.txt`. load-balancer 1.62 and
+LDM-load-balancer 1.66 do not use OpenSSL (their RHEL 8 RPMs link no
+libssl), so they need no new release.

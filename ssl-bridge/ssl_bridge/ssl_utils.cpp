@@ -38,6 +38,73 @@ SSL config for DR load balancer.
 #include "ssl_config.h"
 #include "ssl_utils.h"
 
+#include <openssl/evp.h>
+#include <openssl/opensslv.h>
+
+// 11/18/2026: Only built and shipped on OpenSSL 3.5 LTS or later: hybrid
+// ML-KEM key exchange and ML-DSA certificates need 3.5, and older lines
+// are out of support. RHEL 8 builds need the RHEL 8.10 OpenSSL 3.5
+// update (or OPENSSL_PREFIX, see env/linux.env).
+#if OPENSSL_VERSION_NUMBER < 0x30500000L
+#error "drlb_ssl_server needs OpenSSL 3.5 or later headers. On RHEL 8 apply the RHEL 8.10 updates that bring OpenSSL 3.5, or build with OPENSSL_PREFIX=<OpenSSL 3.5 install>."
+#endif
+
+// 11/18/2026: Default key exchange groups (OpenSSL 3.5 tuple syntax). The
+// first tuple holds the hybrid post-quantum ML-KEM groups, so the server
+// picks one whenever the client supports it. "*" groups get a key share
+// in the client hello (backend connections). "?" skips a group the
+// provider does not have. The RHEL 8 and RHEL 9 crypto policies do not
+// offer ML-KEM, so the bridge sets the list itself.
+static const char *DefaultGroups =
+  "?*X25519MLKEM768:?SecP256r1MLKEM768:?SecP384r1MLKEM1024"
+  "/?*X25519:?secp256r1:?X448:?secp384r1:?secp521r1"
+  "/?ffdhe2048:?ffdhe3072";
+
+// 11/18/2026: Default signature algorithms: ML-DSA first, then the
+// classical algorithms of the RHEL DEFAULT crypto policy
+static const char *DefaultSigalgs =
+  "?mldsa65:?mldsa87:?mldsa44"
+  ":?ecdsa_secp256r1_sha256:?ecdsa_secp384r1_sha384:?ecdsa_secp521r1_sha512"
+  ":?ed25519:?ed448"
+  ":?rsa_pss_pss_sha256:?rsa_pss_pss_sha384:?rsa_pss_pss_sha512"
+  ":?rsa_pss_rsae_sha256:?rsa_pss_rsae_sha384:?rsa_pss_rsae_sha512"
+  ":?rsa_pkcs1_sha256:?rsa_pkcs1_sha384:?rsa_pkcs1_sha512";
+
+int check_openssl_version()
+// 11/18/2026: The headers are checked at build time; this catches an
+// older shared library at run time.
+{
+  if(OpenSSL_version_num() < 0x30500000UL) {
+    NT_print("ERROR - drlb_ssl_server needs OpenSSL 3.5 or later, the library is", OpenSSL_version(OPENSSL_VERSION));
+    NT_print("ERROR - On RHEL 8 apply the RHEL 8.10 updates that bring OpenSSL 3.5");
+    return 1;
+  }
+  return 0;
+}
+
+int set_groups_sigalgs(SSL_CTX *ctx)
+// 11/18/2026: Key exchange groups and signature algorithms for one
+// context. Empty settings use the defaults above, except in FIPS mode
+// where the crypto policy lists are kept. "system" keeps the crypto
+// policy lists.
+{
+  int fips = EVP_default_properties_is_fips_enabled(0) == 1;
+  gxString groups = sslcfg->ssl_groups, sigalgs = sslcfg->ssl_sigalgs;
+  if(groups.is_null()) groups = fips ? "system" : DefaultGroups;
+  if(sigalgs.is_null()) sigalgs = fips ? "system" : DefaultSigalgs;
+  gxString g = groups, a = sigalgs;
+  g.ToUpper(); a.ToUpper();
+  if(g != "SYSTEM" && SSL_CTX_set1_groups_list(ctx, groups.c_str()) != 1) {
+    NT_print("ERROR - Bad ssl_groups:", groups.c_str());
+    return 1;
+  }
+  if(a != "SYSTEM" && SSL_CTX_set1_sigalgs_list(ctx, sigalgs.c_str()) != 1) {
+    NT_print("ERROR - Bad ssl_sigalgs:", sigalgs.c_str());
+    return 1;
+  }
+  return 0;
+}
+
 int init_ssl_cert()
 {
   gxSSL *ssl = &sslcfg->openssl;
@@ -59,6 +126,7 @@ int init_ssl_cert()
   }
 
   NT_print("OpenSSL version:", OpenSSL_version(OPENSSL_VERSION));
+  if(check_openssl_version() != 0) return 1;
 
   // 10/25/2026: Only TLS 1.2 and TLS 1.3. SSLv2, SSLv3, TLS 1.0, TLS 1.1
   // and DTLS are no longer accepted.
@@ -70,6 +138,7 @@ int init_ssl_cert()
   else if(sslcfg->ssl_protocol == "TLSV1_2") {
     sslcfg->meth = gxSSL_TLSv1_2;
     NT_print("SSL connections will only use TLS 1.2"); 
+    NT_print("WARNING - TLS 1.2 has no post-quantum key exchange, use ssl_protocol = TLS or TLSv1_3");
   }
   else if(sslcfg->ssl_protocol == "TLSV1_3") {
     sslcfg->meth = gxSSL_TLSv1_3;
@@ -103,7 +172,19 @@ int init_ssl_cert()
     NT_print("ERROR - Private key does not match the certificate:", sslcfg->ssl_key_file.c_str());
     return 1;
   }
+  if(EVP_PKEY *pk = SSL_CTX_get0_privatekey(ssl->GetCTX())) {
+    const char *type = EVP_PKEY_get0_type_name(pk);
+    NT_print("Certificate key type:", type ? type : "unknown");
+  }
   if(set_ssl_ciphers(ssl->GetCTX()) != 0) return 1;
+  if(set_groups_sigalgs(ssl->GetCTX()) != 0) return 1;
+  if(sslcfg->ssl_groups.is_null()) {
+    NT_print("TLS key exchange groups:", EVP_default_properties_is_fips_enabled(0) == 1 ?
+	     "system (FIPS mode)" : "default (hybrid ML-KEM first)");
+  }
+  else {
+    NT_print("TLS key exchange groups:", sslcfg->ssl_groups.c_str());
+  }
 
   if(sslcfg->ssl_use_dhparms) {
     NT_print("Loading Diffie-Hellman parameters");
@@ -143,6 +224,7 @@ int init_ssl_cert()
       return 1;
     }
     if(set_ssl_ciphers(b->GetCTX()) != 0) return 1;
+    if(set_groups_sigalgs(b->GetCTX()) != 0) return 1;
   }
 
   return 0;

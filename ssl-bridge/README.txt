@@ -1,7 +1,8 @@
-README file for DRLB SSL Bridge 1.62
-Last Modified: 11/17/2026
+README file for DRLB SSL Bridge 1.63
+Last Modified: 11/18/2026
 
-NOTE: 1.62 is a patch release (DataReel 6.4.1 library) of the
+NOTE: 1.63 is a patch release (OpenSSL 3.5 on RHEL 8, post-quantum
+TLS; DataReel 6.4.1 library) of the
 legacy DRLB SSL bridge (drlb_ssl_server) package. drlb_server 2.0 (the tcp_load_balancer
 repository) replaces this package: a drlb_server config with an
 [SSLCONFIG] section runs as the SSL bridge.
@@ -114,6 +115,11 @@ ssl_cert_file =  /etc/drlb/ssl/certs/ca.crt
 ssl_handshake_timeout_secs = 30
 #ssl_cipher_list = ECDHE+AESGCM:ECDHE+CHACHA20
 #ssl_ciphersuites = TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256
+# Key exchange groups, hybrid post-quantum ML-KEM first by default
+# (X25519MLKEM768, then X25519 and P-256); system = crypto policy
+#ssl_groups = X25519MLKEM768:X25519:secp256r1
+# Signature algorithms, ML-DSA added by default; system = crypto policy
+#ssl_sigalgs = system
 #ssl_use_dhparms = 0
 #ssl_dhparms_file =  /etc/drlb/ssl/certs/dhparams.pem
 #ssl_encrypt_backend = 0

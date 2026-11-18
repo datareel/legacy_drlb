@@ -56,6 +56,8 @@ SSLconfig::SSLconfig()
   ssl_protocol = "TLS";
   ssl_cipher_list.Clear();
   ssl_ciphersuites.Clear();
+  ssl_groups.Clear();
+  ssl_sigalgs.Clear();
 }
 
 SSLconfig::~SSLconfig()
@@ -133,6 +135,15 @@ int LoadSSLConfig()
     dfile << "# Set these only to restrict them further for this server." << "\n";
     dfile << "##ssl_cipher_list = ECDHE+AESGCM:ECDHE+CHACHA20" << "\n";
     dfile << "##ssl_ciphersuites = TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256" << "\n";
+    dfile << "#" << "\n";
+    dfile << "# Key exchange groups. The default puts the hybrid post-quantum ML-KEM" << "\n";
+    dfile << "# groups first (X25519MLKEM768, SecP256r1MLKEM768, SecP384r1MLKEM1024)," << "\n";
+    dfile << "# then X25519, P-256, X448, P-384, P-521, ffdhe2048/3072." << "\n";
+    dfile << "# system = use the crypto policy list (the default in FIPS mode)." << "\n";
+    dfile << "##ssl_groups = X25519MLKEM768:X25519:secp256r1" << "\n";
+    dfile << "# Signature algorithms. The default adds ML-DSA to the ECDSA, EdDSA and" << "\n";
+    dfile << "# RSA algorithms. system = use the crypto policy list." << "\n";
+    dfile << "##ssl_sigalgs = system" << "\n";
     dfile << "#" << "\n";
     dfile << "# Seconds allowed for a TLS handshake" << "\n";
     dfile << "ssl_handshake_timeout_secs = 30" << "\n";
@@ -280,6 +291,18 @@ int LoadSSLConfig()
 	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
 	    if(parm_name == "ssl_ciphersuites") {
 	      sslcfg->ssl_ciphersuites = CfgGetEqualToParm(info_line, pbuf);
+	    }
+	  }
+	  if(info_line.IFind("ssl_groups") != -1) {
+	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
+	    if(parm_name == "ssl_groups") {
+	      sslcfg->ssl_groups = CfgGetEqualToParm(info_line, pbuf);
+	    }
+	  }
+	  if(info_line.IFind("ssl_sigalgs") != -1) {
+	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
+	    if(parm_name == "ssl_sigalgs") {
+	      sslcfg->ssl_sigalgs = CfgGetEqualToParm(info_line, pbuf);
 	    }
 	  }
 	  if(info_line.IFind("ssl_protocol") != -1) {

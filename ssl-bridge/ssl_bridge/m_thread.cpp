@@ -486,6 +486,13 @@ void LBClientRequestThread::HandleClientRequest(ClientSocket_t *s)
     }
     return;
   }
+  if(servercfg->log_level >= 4) { // 11/18/2026: Negotiated protocol, cipher and key exchange group
+    SSL *fs = s->openssl->GetSSL();
+    const char *g = SSL_get0_group_name(fs);
+    sbuf << clear << "[" << seq_num << "]: Frontend " << SSL_get_version(fs) << " "
+	 << SSL_get_cipher_name(fs) << " group " << (g ? g : "none");
+    LogMessage(sbuf.c_str());
+  }
 
   switch (servercfg->scheme) {
     case LB_ASSIGNED:
@@ -643,6 +650,13 @@ int LBClientRequestThread::connect_backend(ClientSocket_t *s, LBnode *n, const c
       s->openssl_client->CloseSSLSocket();
       client->Close(); client->SetSocket(-1);
       return 1;
+    }
+    if(servercfg->log_level >= 4) { // 11/18/2026: Negotiated protocol, cipher and key exchange group
+      SSL *bs = s->openssl_client->GetSSL();
+      const char *g = SSL_get0_group_name(bs);
+      sbuf << clear << "[" << seq_num << "]: Backend " << SSL_get_version(bs) << " "
+	   << SSL_get_cipher_name(bs) << " group " << (g ? g : "none");
+      LogMessage(sbuf.c_str());
     }
   }
 #endif
