@@ -61,7 +61,16 @@ cd ../ssl_bridge
 make clean_lib
 make clean
 # 11/18/2026: OpenSSL 3.5 or later only (ssl_utils.cpp also stops older builds)
+# RHEL 8: the RHEL 8 openssl-devel is 1.1.1k. Use the EPEL openssl3-devel
+# (OpenSSL 3.5) when it is installed and nothing else was chosen.
+if [ "${OS}" = "rhel8" ] && [ -z "${OPENSSL_PKG}" ] && [ -z "${OPENSSL_PREFIX}" ] && \
+   pkg-config --exists openssl3 2>/dev/null; then
+    export OPENSSL_PKG=openssl3
+    echo "RHEL 8: building with pkg-config openssl3 $(pkg-config --modversion openssl3)"
+fi
+export OPENSSL_PKG OPENSSL_PREFIX
 OPENSSL_INC=""
+if [ -n "${OPENSSL_PKG}" ]; then OPENSSL_INC=$(pkg-config --cflags ${OPENSSL_PKG}); fi
 if [ -n "${OPENSSL_PREFIX}" ]; then OPENSSL_INC="-I${OPENSSL_PREFIX}/include"; fi
 OPENSSL_HDR=$(printf '#include <openssl/opensslv.h>\n#if OPENSSL_VERSION_NUMBER < 0x30500000L\n#error old\n#endif\nOPENSSL_VERSION_TEXT\n' | g++ ${OPENSSL_INC} -E -P -x c++ - 2>/dev/null | tail -1)
 if [ -z "${OPENSSL_HDR}" ]; then
