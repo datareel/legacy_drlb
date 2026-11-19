@@ -58,6 +58,7 @@ SSLconfig::SSLconfig()
   ssl_ciphersuites.Clear();
   ssl_groups.Clear();
   ssl_sigalgs.Clear();
+  ssl_crypto_policy_file = "/etc/crypto-policies/back-ends/opensslcnf.config";
 }
 
 SSLconfig::~SSLconfig()
@@ -144,6 +145,9 @@ int LoadSSLConfig()
     dfile << "# Signature algorithms. The default adds ML-DSA to the ECDSA, EdDSA and" << "\n";
     dfile << "# RSA algorithms. system = use the crypto policy list." << "\n";
     dfile << "##ssl_sigalgs = system" << "\n";
+    dfile << "# RHEL 8 drlb_ssl_server-openssl35 only (static OpenSSL): the system crypto" << "\n";
+    dfile << "# policy back end it applies at start. none = do not apply a policy." << "\n";
+    dfile << "##ssl_crypto_policy_file = /etc/crypto-policies/back-ends/opensslcnf.config" << "\n";
     dfile << "#" << "\n";
     dfile << "# Seconds allowed for a TLS handshake" << "\n";
     dfile << "ssl_handshake_timeout_secs = 30" << "\n";
@@ -297,6 +301,12 @@ int LoadSSLConfig()
 	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
 	    if(parm_name == "ssl_groups") {
 	      sslcfg->ssl_groups = CfgGetEqualToParm(info_line, pbuf);
+	    }
+	  }
+	  if(info_line.IFind("ssl_crypto_policy_file") != -1) {
+	    CfgGetParmName(info_line, parm_name); parm_name.ToLower();
+	    if(parm_name == "ssl_crypto_policy_file") {
+	      sslcfg->ssl_crypto_policy_file = CfgGetEqualToParm(info_line, pbuf);
 	    }
 	  }
 	  if(info_line.IFind("ssl_sigalgs") != -1) {

@@ -41,6 +41,7 @@ SSL utils for DR load balancer.
 int init_ssl_cert();
 int set_groups_sigalgs(SSL_CTX *ctx);
 int check_openssl_version();
+int apply_crypto_policy(SSL_CTX *ctx, int server, const char *cert_file);
 int fips_mode();
 int pqc_build();
 void openssl_build_info(gxString &s);

@@ -76,7 +76,8 @@ $ ./make_ssl_rpm_package.sh rhel8
 $ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-1*.el8.x86_64.rpm
 
 drlb_ssl_server-openssl35: OpenSSL 3.5.9 built in statically,
-post-quantum TLS, no OpenSSL package needed, not for FIPS mode:
+post-quantum TLS, no OpenSSL package needed. It applies the system crypto
+policy itself (ssl_crypto_policy_file) and refuses to run in FIPS mode:
 $ ./build_openssl35.sh               # static OpenSSL 3.5.9 in /opt/openssl-3.5
 $ ./make_ssl_rpm_package.sh rhel8-openssl35
 $ sudo dnf -y install ${HOME}/rpmbuild/RPMS/x86_64/drlb_ssl_server-openssl35-*.el8.x86_64.rpm

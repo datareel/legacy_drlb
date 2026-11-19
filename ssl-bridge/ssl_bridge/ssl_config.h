@@ -58,6 +58,7 @@ struct SSLconfig {
   gxString ssl_ciphersuites;  // TLS 1.3 cipher suites, system crypto policy if empty
   gxString ssl_groups;   // 11/18/2026: Key exchange groups, ML-KEM first by default, "system" = crypto policy
   gxString ssl_sigalgs;  // 11/18/2026: Signature algorithms, ML-DSA added by default, "system" = crypto policy
+  gxString ssl_crypto_policy_file; // 11/19/2026: RHEL 8 static OpenSSL build only: crypto policy back end ("none" = do not)
   gxSSLMethod meth;
   gxSSL openssl; // Frontend server context
   gxSSL backend; // 10/25/2026: Client context shared by all backend connections
