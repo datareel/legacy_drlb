@@ -1,3 +1,21 @@
+DRLB LDM load balancer 1.67 release notes
+11/18/2026 (not yet released)
+
+1.67 is a packaging release of the legacy DRLB LDM load balancer
+(drlb_ldm_server) package. The program is the same as 1.66 apart from
+its version number.
+
+* The RPM build host recorded in every RPM and SRPM is the neutral name
+  "datareel-build" (DRLB_BUILDHOST), and rpm_builder/make_ldm_rpm_package.sh
+  refuses a package that records another one or requires OpenSSL (the
+  LDM load balancer uses no OpenSSL).
+* RPMs for RHEL 8, RHEL 9 and RHEL 10. The RHEL 8 RPM is built on
+  RHEL 8.10.
+* The DRLB TCP load balancer and SSL bridge are drlb_server 2.0.1 (the
+  tcp_load_balancer repository); the LDM load balancer is not part of it.
+
+======================================================================
+
 DRLB LDM load balancer 1.66 release notes
 Released 11/17/2026
 

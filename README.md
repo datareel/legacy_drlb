@@ -8,7 +8,7 @@ git history:
 |---|---|---|---|
 | `load-balancer/` | `drlb_server`, TCP load balancer | 1.62 | `load-balancer-1.62` |
 | `ssl-bridge/` | `drlb_ssl_server`, SSL bridge | 1.62 (1.63 in preparation) | `ssl-bridge-1.62` |
-| `LDM-load-balancer/` | `drlb_ldm_server`, LDM load balancer | 1.66 | `LDM-load-balancer-1.66` |
+| `LDM-load-balancer/` | `drlb_ldm_server`, LDM load balancer | 1.66 (1.67 in preparation) | `LDM-load-balancer-1.66` |
 
 Earlier tags from the original repositories are kept with the folder name
 in front, for example `load-balancer-1.60-beta`.
@@ -87,3 +87,13 @@ ML-DSA certificates, and the ssl_groups and ssl_sigalgs settings. See
 `ssl-bridge/RELEASE_NOTES_1.63.txt`. load-balancer 1.62 and
 LDM-load-balancer 1.66 do not use OpenSSL (their RHEL 8 RPMs link no
 libssl), so they need no new release.
+
+## Next legacy release (in preparation)
+
+- **LDM-load-balancer 1.67:** a packaging release (no program changes):
+  neutral RPM build host and package checks. RPMs for RHEL 8, 9 and 10
+  and the source code.
+- **load-balancer and ssl-bridge:** source code only. On RHEL 8, 9 and
+  10 they are replaced by drlb_server 2.0.1 (tcp_load_balancer), which
+  is the load balancer and the SSL bridge in one program. ssl-bridge
+  1.63 (OpenSSL 3.5 checks and post-quantum TLS) is published as source.

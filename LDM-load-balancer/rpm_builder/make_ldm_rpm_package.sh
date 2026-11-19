@@ -108,7 +108,24 @@ fi
 tar cfz ${HOME}/rpmbuild/BUILD/drlb_ldm_server.tar.gz *
 
 cd ${BUILDDIR_tmp}/rpmbuild/SPECS
-rpmbuild -ba --buildroot=${BUILDDIR_tmp}/rpmbuild/BUILDROOT drlb_ldm.spec
+# 11/18/2026: The RPM header records the build host. Use a neutral name
+# so the name of the machine that built the release is not in the package.
+DRLB_BUILDHOST=${DRLB_BUILDHOST:-datareel-build}
+rpmbuild -ba --define "_buildhost ${DRLB_BUILDHOST}" --buildroot=${BUILDDIR_tmp}/rpmbuild/BUILDROOT drlb_ldm.spec
+
+# 11/18/2026: The LDM load balancer uses no OpenSSL, and every package must
+# record the neutral build host
+RPM=${HOME}/rpmbuild/RPMS/x86_64/drlb_ldm_server-${Version}-${Release}.x86_64.rpm
+if rpm -qpR "${RPM}" | grep -qE '^(libssl|libcrypto)'; then
+    echo "ERROR - ${RPM} requires OpenSSL"; exit 1
+fi
+for r in "${RPM}" ${HOME}/rpmbuild/SRPMS/drlb_ldm_server-${Version}-${Release}.src.rpm; do
+    if [ "$(rpm -qp --qf '%{BUILDHOST}' "${r}")" != "${DRLB_BUILDHOST}" ]; then
+        echo "ERROR - ${r} build host is not ${DRLB_BUILDHOST}"
+        exit 1
+    fi
+done
+echo "Built ${RPM##*/} (build host ${DRLB_BUILDHOST})"
 
 rm -f ${HOME}/rpmbuild/BUILD/drlb_ldm_server.tar.gz
 rm -rf ${BUILDDIR_tmp}

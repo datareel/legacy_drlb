@@ -1,6 +1,6 @@
 BuildArch: x86_64
 Name: drlb_ldm_server
-Version: 1.66
+Version: 1.67
 Release: 1.el8
 Summary: Datareel LDM Load Balancer RPM
 Group: System Environment/Daemons
@@ -69,6 +69,9 @@ if [ $1 -ge 1 ] ; then
 fi
 
 %changelog
+* Wed Nov 18 2026 Datareel <datareel.com>
+- Version 1.67, a packaging release of this legacy package (no program
+  changes): neutral RPM build host, linkage and build host checks
 * Tue Nov 17 2026 Datareel <datareel.com>
 - Version 1.66, a patch release of this legacy package
 - DataReel 6.4.1 library update (was 6.4 beta 1)
