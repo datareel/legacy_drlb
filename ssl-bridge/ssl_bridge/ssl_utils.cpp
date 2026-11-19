@@ -222,13 +222,7 @@ int apply_crypto_policy(SSL_CTX *ctx, int server, const char *cert_file)
   if(SSL_CTX_get_min_proto_version(ctx) < min_before) SSL_CTX_set_min_proto_version(ctx, min_before);
   if(max_before && (SSL_CTX_get_max_proto_version(ctx) == 0 || SSL_CTX_get_max_proto_version(ctx) > max_before))
     SSL_CTX_set_max_proto_version(ctx, max_before);
-  if(cert_file && *cert_file && SSL_CTX_use_certificate_chain_file(ctx, cert_file) != 1) {
-    NT_print("ERROR - The certificate does not meet the system crypto policy (security level):", cert_file);
-    gxString err;
-    gxSSL::GlobalSSLError(err);
-    if(!err.is_null()) NT_print(err.c_str());
-    return 1;
-  }
+  (void)cert_file; // The frontend loads its certificate after the policy
   if(server) {
     gxString m;
     m << clear << "System crypto policy applied (" << applied << " settings): " << fname;
@@ -321,7 +315,25 @@ int init_ssl_cert()
   ssl->MakeServer();
   if(!sslcfg->ssh_ca_list_file.is_null()) ssl->SetCAList(sslcfg->ssh_ca_list_file.c_str());
   NT_print("Loading SSL key and cert");
-  if(!ssl->InitCTX(sslcfg-> ssl_cert_file.c_str(), sslcfg->ssl_key_file.c_str())) {
+  // 11/19/2026: The static OpenSSL build applies the crypto policy before
+  // the key and certificate are loaded, so the policy's security level
+  // decides which certificates are accepted (LEGACY: SECLEVEL 1, FUTURE: 3)
+  int policy_first = strcmp(DRLB_OPENSSL_FLAVOR, "static") == 0;
+  if(policy_first) {
+    if(!ssl->InitCTX("", "") || apply_crypto_policy(ssl->GetCTX(), 1, 0) != 0) {
+      NT_print("ERROR - Cannot initialize the SSL server context");
+      return 1;
+    }
+    if(SSL_CTX_use_certificate_chain_file(ssl->GetCTX(), sslcfg->ssl_cert_file.c_str()) != 1 ||
+       SSL_CTX_use_PrivateKey_file(ssl->GetCTX(), sslcfg->ssl_key_file.c_str(), SSL_FILETYPE_PEM) != 1) {
+      NT_print("ERROR - Problem loading key and cert (the system crypto policy's security level also applies)");
+      gxString err;
+      gxSSL::GlobalSSLError(err);
+      if(!err.is_null()) NT_print(err.c_str());
+      return 1;
+    }
+  }
+  else if(!ssl->InitCTX(sslcfg-> ssl_cert_file.c_str(), sslcfg->ssl_key_file.c_str())) {
     NT_print("ERROR - Problem loading key and cert");
     NT_print(ssl->SSLExceptionMessage());
     gxString err;
@@ -341,7 +353,6 @@ int init_ssl_cert()
 #endif
     NT_print("Certificate key type:", type ? type : "unknown");
   }
-  if(apply_crypto_policy(ssl->GetCTX(), 1, sslcfg->ssl_cert_file.c_str()) != 0) return 1;
   if(set_ssl_ciphers(ssl->GetCTX()) != 0) return 1;
   if(set_groups_sigalgs(ssl->GetCTX()) != 0) return 1;
   if(!pqc_build()) {
