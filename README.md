@@ -97,3 +97,10 @@ libssl), so they need no new release.
   10 they are replaced by drlb_server 2.0.1 (tcp_load_balancer), which
   is the load balancer and the SSL bridge in one program. ssl-bridge
   1.63 (OpenSSL 3.5 checks and post-quantum TLS) is published as source.
+- **RHEL 6 and RHEL 7 RPMs (load-balancer 1.58, ssl-bridge 1.58, LDM
+  1.62):** rebuilt on 11/19/2026 from the same published source code, with
+  no program changes and the neutral build host datareel-build, in CentOS
+  6.10 and 7.9 containers (ssl-bridge 1.58 for RHEL 7 in CentOS 7.2: its
+  bundled gxssl.cpp builds against OpenSSL 1.0.1e, the RHEL 7 OpenSSL of
+  2016). Same package names, versions and file lists as the 2016 RPMs.
+  RHEL 6 and RHEL 7 are end of life, and so is their OpenSSL 1.0.x.
