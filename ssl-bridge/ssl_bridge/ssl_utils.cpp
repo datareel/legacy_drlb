@@ -39,6 +39,7 @@ SSL config for DR load balancer.
 #include "ssl_utils.h"
 
 #include <stdio.h>
+#include <string.h>
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/objects.h>
@@ -251,6 +252,10 @@ int init_ssl_cert()
   }
   if(set_ssl_ciphers(ssl->GetCTX()) != 0) return 1;
   if(set_groups_sigalgs(ssl->GetCTX()) != 0) return 1;
+  if(fips_mode() && strcmp(DRLB_OPENSSL_FLAVOR, "static") == 0) {
+    NT_print("WARNING - FIPS mode is on, but this program's built-in OpenSSL is not FIPS validated");
+    NT_print("WARNING - On a FIPS mode host use the drlb_ssl_server package (FIPS build on the system OpenSSL)");
+  }
   if(!pqc_build()) {
     NT_print("INFO - FIPS build: post-quantum TLS (ML-KEM key exchange, ML-DSA certificates) is not available");
     NT_print("INFO - TLS key exchange groups and signature algorithms follow the system crypto policy");
